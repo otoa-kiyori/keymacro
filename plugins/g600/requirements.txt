@@ -1,0 +1,3 @@
+# G600 plugin dependencies
+python3-evdev    # for software remap (BTN_* macros); install via: sudo apt install python3-evdev
+# Also requires: libratbag (ratbagctl CLI) — sudo apt install ratbagd
