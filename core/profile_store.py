@@ -1,8 +1,10 @@
 """
-core/profile_store.py — Per-device profile storage for keymacro.
+core/profile_store.py — Global unified profile storage for keymacro.
 
-Profiles are stored as JSON at:
-    ~/.config/keymacro/profiles/<plugin_name>.json
+A single ProfileData holds bindings for ALL devices simultaneously.
+When a profile is applied, every active plugin reads its own section.
+
+Stored at: ~/.config/keymacro/profiles.json
 
 Format:
 {
@@ -10,27 +12,30 @@ Format:
   "profiles": [
     {
       "name": "gaming",
-      "device_plugin": "g13",
       "bindings": {
-        "G1": {"inline_tokens": ["KEY_A"]},
-        "G2": {"library_name": "ctrl_click"}
+        "g13":  {"G1": {"inline_tokens": ["KEY_A"]}, "G2": {"library_name": "ctrl_z"}},
+        "g600": {"LMB": {"inline_tokens": ["BTN_LEFT"]}}
       },
-      "plugin_data": {"g13": {}}
+      "plugin_data": {
+        "g13":  {},
+        "g600": {"hw_slot": 0, "dpi": 1200, "led_mode": "on", "led_color": "ffffff",
+                 "led_duration": 2000, "buttons": {}}
+      }
     }
   ]
 }
 
-plugin_data is opaque to core — each plugin serializes/deserializes its own
-section. Core only stores and retrieves it.
+plugin_data[plugin_name] is opaque to core — each plugin serializes/deserializes its own section.
 """
 
 from __future__ import annotations
 
+import copy
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any
 
-from core.config import PROFILES_DIR, ensure_dirs
+from core.config import PROFILES_FILE, ensure_dirs
 
 
 @dataclass
@@ -58,72 +63,81 @@ class MacroRef:
 @dataclass
 class ProfileData:
     """
-    A single named profile.
+    A single unified keymacro profile covering ALL devices.
 
-    bindings:    button_id → MacroRef
-    plugin_data: opaque device-specific dict, keyed by plugin name
-                 e.g. {"g600": {"dpi": 1200, "led_mode": "on", ...}}
+    bindings:    {plugin_name: {button_id: MacroRef}}
+    plugin_data: {plugin_name: opaque device-specific dict}
+                  e.g. {"g600": {"hw_slot": 0, "dpi": 1200, ...}}
     """
-    name:          str
-    device_plugin: str
-    bindings:      dict[str, MacroRef] = field(default_factory=dict)
-    plugin_data:   dict[str, Any]      = field(default_factory=dict)
+    name: str
+    bindings:    dict[str, dict[str, MacroRef]] = field(default_factory=dict)
+    plugin_data: dict[str, Any]                 = field(default_factory=dict)
+
+    # ── Serialization ─────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
-            "device_plugin": self.device_plugin,
-            "bindings": {k: v.to_dict() for k, v in self.bindings.items()},
+            "bindings": {
+                plugin: {btn: ref.to_dict() for btn, ref in btns.items()}
+                for plugin, btns in self.bindings.items()
+            },
             "plugin_data": self.plugin_data,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "ProfileData":
-        bindings = {
-            k: MacroRef.from_dict(v)
-            for k, v in d.get("bindings", {}).items()
-        }
+        bindings: dict[str, dict[str, MacroRef]] = {}
+        for plugin, btns in d.get("bindings", {}).items():
+            bindings[plugin] = {btn: MacroRef.from_dict(ref) for btn, ref in btns.items()}
         return cls(
             name=d["name"],
-            device_plugin=d["device_plugin"],
             bindings=bindings,
             plugin_data=d.get("plugin_data", {}),
         )
 
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
     def copy(self, new_name: str) -> "ProfileData":
-        import copy
         dup = copy.deepcopy(self)
         dup.name = new_name
         return dup
 
+    def plugin_bindings(self, plugin_name: str) -> dict[str, MacroRef]:
+        """Return the binding dict for one plugin (empty dict if none set)."""
+        return self.bindings.get(plugin_name, {})
+
+    def set_button(self, plugin_name: str, button_id: str, ref: MacroRef) -> None:
+        self.bindings.setdefault(plugin_name, {})[button_id] = ref
+
+    def clear_button(self, plugin_name: str, button_id: str) -> None:
+        self.bindings.get(plugin_name, {}).pop(button_id, None)
+
 
 class ProfileStore:
     """
-    Per-device profile collection with JSON persistence.
+    Global profile collection with JSON persistence.
 
-    One instance per plugin. Backed by:
-        ~/.config/keymacro/profiles/<plugin_name>.json
+    Backed by a single file: ~/.config/keymacro/profiles.json
     """
 
-    def __init__(self, plugin_name: str):
-        self._plugin_name = plugin_name
+    def __init__(self):
         self._profiles: list[ProfileData] = []
         self._active: str | None = None
-        self._path = PROFILES_DIR / f"{plugin_name}.json"
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
     def load_from_disk(self) -> None:
         ensure_dirs()
-        if not self._path.exists():
+        if not PROFILES_FILE.exists():
             return
         try:
-            with open(self._path, "r", encoding="utf-8") as f:
+            with open(PROFILES_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._profiles = [ProfileData.from_dict(p) for p in data.get("profiles", [])]
             self._active   = data.get("active")
         except Exception as e:
-            print(f"[ProfileStore:{self._plugin_name}] load error: {e}")
+            print(f"[ProfileStore] load error: {e}")
 
     def flush_to_disk(self) -> None:
         ensure_dirs()
@@ -132,10 +146,10 @@ class ProfileStore:
             "profiles": [p.to_dict() for p in self._profiles],
         }
         try:
-            with open(self._path, "w", encoding="utf-8") as f:
+            with open(PROFILES_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"[ProfileStore:{self._plugin_name}] save error: {e}")
+            print(f"[ProfileStore] save error: {e}")
 
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
@@ -151,7 +165,7 @@ class ProfileStore:
     def create(self, name: str) -> ProfileData:
         if self.get(name):
             raise ValueError(f"Profile '{name}' already exists")
-        p = ProfileData(name=name, device_plugin=self._plugin_name)
+        p = ProfileData(name=name)
         self._profiles.append(p)
         if self._active is None:
             self._active = name
@@ -185,7 +199,6 @@ class ProfileStore:
                 self._profiles[i] = profile
                 self.flush_to_disk()
                 return
-        # Not found — add it
         self._profiles.append(profile)
         self.flush_to_disk()
 

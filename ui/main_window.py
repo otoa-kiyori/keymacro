@@ -2,7 +2,7 @@
 ui/main_window.py — Main settings window for keymacro.
 
 Tabbed layout:
-  Device  — device canvas + profile selector + optional device settings widget
+  Device  — global profile selector + one canvas group per active plugin
   Macros  — global macro library browser/editor
   Plugins — plugin list, status, install hints, activate/deactivate
 """
@@ -13,13 +13,14 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QLabel, QStatusBar, QPushButton,
+    QTabWidget, QLabel, QStatusBar, QScrollArea, QGroupBox,
 )
-from PyQt6.QtCore import Qt, QByteArray
+from PyQt6.QtCore import Qt
 
 from ui.profile_panel        import ProfilePanel
 from ui.macro_library_panel  import MacroLibraryPanel
 from ui.plugin_panel         import PluginPanel
+from ui.programs_panel       import ProgramsPanel
 from core.config             import get_settings
 
 if TYPE_CHECKING:
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
     from core.plugin_manager import PluginManager
     from core.profile_store  import ProfileStore
     from core.macro_library  import MacroLibrary
+    from core.program_map    import ProgramProfileMap
+    from core.window_watcher import WindowWatcher
 
 
 class MainWindow(QMainWindow):
@@ -34,19 +37,26 @@ class MainWindow(QMainWindow):
 
     def __init__(
         self,
-        signals:          "AppSignals",
-        plugin_manager:   "PluginManager",
-        profile_stores:   dict[str, "ProfileStore"],
-        macro_library:    "MacroLibrary",
-        active_plugin_name: str | None = None,
+        signals:        "AppSignals",
+        plugin_manager: "PluginManager",
+        store:          "ProfileStore",
+        macro_library:  "MacroLibrary",
+        active_plugins: dict,          # shared reference to KMApp._active_plugins
+        program_map:    "ProgramProfileMap | None" = None,
+        watcher:        "WindowWatcher | None" = None,
         parent=None,
     ):
         super().__init__(parent)
-        self._signals          = signals
-        self._pm               = plugin_manager
-        self._stores           = profile_stores
-        self._macro_library    = macro_library
-        self._active_plugin    = active_plugin_name
+        self._signals        = signals
+        self._pm             = plugin_manager
+        self._store          = store
+        self._macro_library  = macro_library
+        self._active_plugins = active_plugins   # shared reference — stays current
+        self._program_map    = program_map
+        self._watcher        = watcher
+
+        self._canvases: dict[str, QWidget] = {}  # plugin_name → canvas widget
+        self._device_tab_widget: QWidget | None = None
 
         self.setWindowTitle("keymacro")
         self.setMinimumSize(760, 520)
@@ -57,14 +67,10 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
 
-        self._device_tab_widget:  QWidget | None = None
-        self._canvas_widget:      QWidget | None = None
-        self._profile_panel:      ProfilePanel | None = None
-        self._device_settings_widget: QWidget | None = None
-
         self._build_device_tab()
         self._build_macros_tab()
         self._build_plugins_tab()
+        self._build_programs_tab()
 
         self._connect_signals()
         self._restore_geometry()
@@ -72,54 +78,71 @@ class MainWindow(QMainWindow):
     # ── Tab: Device ───────────────────────────────────────────────────────────
 
     def _build_device_tab(self) -> None:
+        self._canvases.clear()
+
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
 
-        plugin_name = self._active_plugin
-        plugin = self._pm.get_plugin(plugin_name) if plugin_name else None
+        # Global profile selector at the top
+        profile_panel = ProfilePanel(self._signals, self._store)
+        outer.addWidget(profile_panel)
 
-        if plugin and plugin.is_available():
-            # Profile selector
-            store = self._stores.get(plugin_name)
-            if store:
-                self._profile_panel = ProfilePanel(
-                    self._signals, store, plugin_name
-                )
-                layout.addWidget(self._profile_panel)
+        if self._active_plugins:
+            # Scrollable area containing one group box per active plugin
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
-            # Device canvas (scrollable via HBox centering)
-            canvas_row = QHBoxLayout()
-            canvas_row.addStretch()
-            try:
-                canvas = plugin.create_canvas()
-                self._canvas_widget = canvas
-                canvas_row.addWidget(canvas)
-            except Exception as e:
-                err_label = QLabel(f"Canvas error: {e}")
-                canvas_row.addWidget(err_label)
-            canvas_row.addStretch()
-            layout.addLayout(canvas_row)
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setSpacing(12)
+            container_layout.setContentsMargins(0, 0, 0, 0)
 
-            # Optional device-specific settings widget (DPI, LED, etc.)
-            try:
-                dsw = plugin.create_settings_widget()
-                if dsw:
-                    self._device_settings_widget = dsw
-                    layout.addWidget(dsw)
-            except Exception:
-                pass
+            for plugin_name, plugin in self._active_plugins.items():
+                group = QGroupBox(plugin.display_name)
+                group_layout = QVBoxLayout(group)
+                group_layout.setSpacing(6)
 
-            layout.addStretch()
+                # Canvas (centered)
+                canvas_row = QHBoxLayout()
+                canvas_row.addStretch()
+                try:
+                    canvas = plugin.create_canvas()
+                    self._canvases[plugin_name] = canvas
+                    # Populate labels from the current active profile immediately
+                    profile = self._store.get_active()
+                    if hasattr(canvas, "update_bindings"):
+                        plugin_bindings = profile.bindings.get(plugin_name, {}) if profile else {}
+                        raw = {k: " ".join(v.inline_tokens or []) for k, v in plugin_bindings.items()}
+                        canvas.update_bindings(raw)
+                    canvas_row.addWidget(canvas)
+                except Exception as e:
+                    canvas_row.addWidget(QLabel(f"Canvas error: {e}"))
+                canvas_row.addStretch()
+                group_layout.addLayout(canvas_row)
+
+                # Optional device-specific settings widget (DPI, LED, etc.)
+                try:
+                    dsw = plugin.create_settings_widget()
+                    if dsw:
+                        group_layout.addWidget(dsw)
+                except Exception:
+                    pass
+
+                container_layout.addWidget(group)
+
+            container_layout.addStretch()
+            scroll.setWidget(container)
+            outer.addWidget(scroll, stretch=1)
         else:
-            msg = "No device active." if not plugin else f"{plugin.display_name} is not available."
-            lbl = QLabel(msg)
+            lbl = QLabel("No device active.\nActivate a plugin in the Plugins tab.")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet("color: #888; font-size: 14px;")
-            layout.addStretch()
-            layout.addWidget(lbl)
-            layout.addStretch()
+            outer.addStretch()
+            outer.addWidget(lbl)
+            outer.addStretch()
 
         self._device_tab_widget = tab
         idx = self._tabs.indexOf(tab)
@@ -128,14 +151,13 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentIndex(0)
 
     def _rebuild_device_tab(self) -> None:
-        """Replace the Device tab after plugin activation."""
-        idx = self._tabs.indexOf(self._device_tab_widget) if self._device_tab_widget else 0
+        old_tab = self._device_tab_widget
+        idx = self._tabs.indexOf(old_tab) if old_tab else 0
         if idx < 0:
             idx = 0
-        self._tabs.removeTab(idx)
-        self._canvas_widget = None
-        self._profile_panel = None
-        self._device_settings_widget = None
+        if old_tab:
+            self._tabs.removeTab(idx)
+            old_tab.deleteLater()
         self._build_device_tab()
         self._tabs.insertTab(idx, self._device_tab_widget, "Device")
         self._tabs.setCurrentIndex(idx)
@@ -149,25 +171,48 @@ class MainWindow(QMainWindow):
     # ── Tab: Plugins ──────────────────────────────────────────────────────────
 
     def _build_plugins_tab(self) -> None:
-        panel = PluginPanel(self._signals, self._pm, self._active_plugin)
+        panel = PluginPanel(self._signals, self._pm, self._active_plugins)
         self._tabs.addTab(panel, "Plugins")
+
+    # ── Tab: Programs ─────────────────────────────────────────────────────────
+
+    def _build_programs_tab(self) -> None:
+        if self._program_map is None or self._watcher is None:
+            return
+        panel = ProgramsPanel(
+            self._signals, self._program_map, self._store, self._watcher
+        )
+        self._tabs.addTab(panel, "Programs")
 
     # ── Signal connections ────────────────────────────────────────────────────
 
     def _connect_signals(self) -> None:
         self._signals.plugin_activated.connect(self._on_plugin_activated)
+        self._signals.plugin_deactivated.connect(self._on_plugin_deactivated)
         self._signals.active_profile_switched.connect(self._on_profile_switched)
         self._signals.status_message.connect(self._on_status_message)
         self._signals.plugin_error.connect(self._on_plugin_error)
         self._signals.button_clicked.connect(self._on_button_clicked)
 
     def _on_plugin_activated(self, plugin_name: str) -> None:
-        self._active_plugin = plugin_name
         self._rebuild_device_tab()
 
-    def _on_profile_switched(self, plugin_name: str, profile_name: str) -> None:
-        if plugin_name == self._active_plugin:
-            self._status.showMessage(f"Profile: {profile_name}", 3000)
+    def _on_plugin_deactivated(self, plugin_name: str) -> None:
+        self._rebuild_device_tab()
+
+    def _on_profile_switched(self, profile_name: str) -> None:
+        self._status.showMessage(f"Profile: {profile_name}", 3000)
+        # Refresh all canvas labels
+        profile = self._store.get(profile_name)
+        if profile:
+            for plugin_name, canvas in self._canvases.items():
+                if hasattr(canvas, "update_bindings"):
+                    plugin_bindings = profile.bindings.get(plugin_name, {})
+                    raw = {
+                        k: " ".join(v.inline_tokens or [])
+                        for k, v in plugin_bindings.items()
+                    }
+                    canvas.update_bindings(raw)
 
     def _on_status_message(self, msg: str) -> None:
         if msg == "open_window":
@@ -182,17 +227,19 @@ class MainWindow(QMainWindow):
 
     def _on_button_clicked(self, plugin_name: str, button_id: str) -> None:
         """Open a button edit dialog when a canvas button is clicked."""
-        if plugin_name != self._active_plugin:
+        if plugin_name not in self._active_plugins:
             return
-        store = self._stores.get(plugin_name)
-        if store is None:
+        # Refuse to edit hardware-locked buttons (e.g. G600 LMB / RMB)
+        plugin = self._active_plugins[plugin_name]
+        locked: set[str] = getattr(plugin, "LOCKED_BUTTONS", set())
+        if button_id in locked:
             return
-        profile = store.get_active()
+        profile = self._store.get_active()
         if profile is None:
             return
-        self._open_button_edit(plugin_name, button_id, profile, store)
+        self._open_button_edit(plugin_name, button_id, profile)
 
-    def _open_button_edit(self, plugin_name, button_id, profile, store) -> None:
+    def _open_button_edit(self, plugin_name: str, button_id: str, profile) -> None:
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox, QLabel
         from ui.macro_editor import MacroEditorWidget
         from core.profile_store import MacroRef
@@ -202,11 +249,12 @@ class MainWindow(QMainWindow):
         dlg.setMinimumWidth(500)
         layout = QVBoxLayout(dlg)
 
-        layout.addWidget(QLabel(f"Button: <b>{button_id}</b>"))
+        layout.addWidget(QLabel(f"Plugin: <b>{plugin_name}</b>  Button: <b>{button_id}</b>"))
         layout.addWidget(QLabel("Token sequence (leave empty to unbind):"))
 
         editor = MacroEditorWidget()
-        ref = profile.bindings.get(button_id)
+        plugin_bindings = profile.bindings.get(plugin_name, {})
+        ref = plugin_bindings.get(button_id)
         if ref and ref.inline_tokens:
             editor.set_tokens(ref.inline_tokens)
         layout.addWidget(editor)
@@ -220,16 +268,21 @@ class MainWindow(QMainWindow):
 
         if dlg.exec() == QDialog.DialogCode.Accepted:
             tokens = editor.get_tokens()
+            nested = profile.bindings.setdefault(plugin_name, {})
             if tokens:
-                profile.bindings[button_id] = MacroRef(inline_tokens=tokens)
+                nested[button_id] = MacroRef(inline_tokens=tokens)
             else:
-                profile.bindings.pop(button_id, None)
-            store.save(profile)
-            self._signals.profile_saved.emit(plugin_name, profile.name)
-            # Refresh canvas labels
-            if self._canvas_widget and hasattr(self._canvas_widget, "update_bindings"):
-                raw = {k: " ".join(v.inline_tokens or []) for k, v in profile.bindings.items()}
-                self._canvas_widget.update_bindings(raw)
+                nested.pop(button_id, None)
+            self._store.save(profile)
+            self._signals.profile_saved.emit(profile.name)
+            # Refresh canvas labels for this plugin
+            canvas = self._canvases.get(plugin_name)
+            if canvas and hasattr(canvas, "update_bindings"):
+                raw = {
+                    k: " ".join(v.inline_tokens or [])
+                    for k, v in nested.items()
+                }
+                canvas.update_bindings(raw)
 
     # ── Geometry persistence ──────────────────────────────────────────────────
 
@@ -242,4 +295,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         s = get_settings()
         s.setValue("MainWindow/geometry", self.saveGeometry())
-        event.accept()   # hide, not quit (QuitOnLastWindowClosed=False)
+        # Ignore the close — just hide. The window object must stay alive so
+        # "Open keymacro…" from the tray can call show() again.
+        # The only way to fully quit is via the tray Quit action.
+        event.ignore()
+        self.hide()

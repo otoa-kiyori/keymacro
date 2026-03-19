@@ -15,15 +15,15 @@ CONFIG_DIR = Path(
     )
 )
 
-MACROS_FILE   = CONFIG_DIR / "macros.json"
-PROFILES_DIR  = CONFIG_DIR / "profiles"
-SETTINGS_FILE = CONFIG_DIR / "settings.ini"
+MACROS_FILE    = CONFIG_DIR / "macros.json"
+PROFILES_FILE  = CONFIG_DIR / "profiles.json"   # single global profile store
+PROGRAMS_FILE  = CONFIG_DIR / "programs.json"   # program → profile mapping
+SETTINGS_FILE  = CONFIG_DIR / "settings.ini"
 
 
 def ensure_dirs() -> None:
     """Create config directories if they don't exist yet."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_settings() -> QSettings:

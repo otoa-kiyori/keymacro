@@ -1,8 +1,8 @@
 """
 ui/plugin_panel.py — Plugin list and status panel for keymacro.
 
-Shows all discovered plugins with their availability status.
-Allows activating/deactivating plugins.
+Multiple plugins can be active simultaneously.
+Activate adds to the active set; Deactivate removes from it.
 """
 
 from __future__ import annotations
@@ -16,28 +16,32 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 if TYPE_CHECKING:
-    from core.signals import AppSignals
+    from core.signals        import AppSignals
     from core.plugin_manager import PluginManager
 
 
 class PluginPanel(QWidget):
     """
     Left: list of all discovered plugins with status icons.
-    Right: info pane with display_name, description, status, install hint,
-           and Activate / Deactivate buttons.
+    Right: info pane — display_name, description, status, install hint,
+           Activate / Deactivate buttons.
+
+    Active plugin set is tracked locally via signals so the panel stays
+    in sync without holding a direct reference to _active_plugins.
     """
 
     def __init__(
         self,
-        signals: "AppSignals",
+        signals:        "AppSignals",
         plugin_manager: "PluginManager",
-        active_plugin_name: str | None,
+        active_plugins: dict,          # shared reference to KMApp._active_plugins
         parent=None,
     ):
         super().__init__(parent)
-        self._signals = signals
-        self._pm = plugin_manager
-        self._active_plugin_name = active_plugin_name
+        self._signals        = signals
+        self._pm             = plugin_manager
+        # Track active set locally — kept in sync via signals
+        self._active_names: set[str] = set(active_plugins.keys())
         self._build_ui()
         self._populate()
         self._connect_signals()
@@ -50,7 +54,7 @@ class PluginPanel(QWidget):
 
         # ── Left: plugin list ──
         self._list = QListWidget()
-        self._list.setFixedWidth(200)
+        self._list.setFixedWidth(220)
         self._list.currentRowChanged.connect(self._on_selection_changed)
         splitter.addWidget(self._list)
 
@@ -93,20 +97,32 @@ class PluginPanel(QWidget):
         root.addWidget(splitter)
 
     def _populate(self) -> None:
+        current_name = self._current_plugin_name()
+        self._list.blockSignals(True)
         self._list.clear()
         for name in self._pm.get_all_names():
-            plugin  = self._pm.get_plugin(name)
-            err     = self._pm.get_load_error(name)
+            plugin = self._pm.get_plugin(name)
+            err    = self._pm.get_load_error(name)
+            is_active = name in self._active_names
             if err:
                 label = f"⚠ {name}"
+            elif is_active:
+                label = f"● {plugin.display_name}"
             elif plugin and plugin.is_available():
-                label = f"✓ {plugin.display_name}"
+                label = f"○ {plugin.display_name}"
             else:
                 label = f"○ {plugin.display_name if plugin else name}"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, name)
             self._list.addItem(item)
+        self._list.blockSignals(False)
 
+        # Restore selection
+        if current_name:
+            for i in range(self._list.count()):
+                if self._list.item(i).data(Qt.ItemDataRole.UserRole) == current_name:
+                    self._list.setCurrentRow(i)
+                    return
         if self._list.count() > 0:
             self._list.setCurrentRow(0)
 
@@ -114,18 +130,18 @@ class PluginPanel(QWidget):
         if row < 0:
             self._clear_info()
             return
-        item = self._list.item(row)
-        name = item.data(Qt.ItemDataRole.UserRole)
+        name = self._list.item(row).data(Qt.ItemDataRole.UserRole)
         self._show_info(name)
 
     def _show_info(self, name: str) -> None:
-        plugin = self._pm.get_plugin(name)
-        err    = self._pm.get_load_error(name)
+        plugin    = self._pm.get_plugin(name)
+        err       = self._pm.get_load_error(name)
+        is_active = name in self._active_names
 
         if err:
             self._lbl_name.setText(name)
             self._lbl_desc.setText("")
-            self._lbl_status.setText(f"<span style='color:red'>Load error</span>")
+            self._lbl_status.setText("<span style='color:red'>Load error</span>")
             self._hint_box.setVisible(True)
             self._hint_box.setPlainText(err)
             self._btn_activate.setEnabled(False)
@@ -137,8 +153,6 @@ class PluginPanel(QWidget):
             return
 
         available = plugin.is_available()
-        is_active = name == self._active_plugin_name
-
         self._lbl_name.setText(plugin.display_name)
         self._lbl_desc.setText(plugin.description)
 
@@ -182,10 +196,13 @@ class PluginPanel(QWidget):
             self._signals.plugin_deactivated.emit(name)
 
     def _connect_signals(self) -> None:
-        self._signals.plugin_activated.connect(self._on_plugin_state_changed)
-        self._signals.plugin_deactivated.connect(self._on_plugin_state_changed)
+        self._signals.plugin_activated.connect(self._on_plugin_activated)
+        self._signals.plugin_deactivated.connect(self._on_plugin_deactivated)
 
-    def _on_plugin_state_changed(self, plugin_name: str) -> None:
-        self._active_plugin_name = plugin_name if self._signals.sender() else self._active_plugin_name
-        # Re-read from app state by repopulating
+    def _on_plugin_activated(self, plugin_name: str) -> None:
+        self._active_names.add(plugin_name)
+        self._populate()
+
+    def _on_plugin_deactivated(self, plugin_name: str) -> None:
+        self._active_names.discard(plugin_name)
         self._populate()

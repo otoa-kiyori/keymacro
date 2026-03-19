@@ -1,8 +1,8 @@
 """
-ui/profile_panel.py — Profile list and CRUD panel for keymacro.
+ui/profile_panel.py — Global profile list and CRUD panel.
 
-Shows the profile list for the active device, allows switching the active
-profile, and provides New / Duplicate / Delete controls.
+Profiles are now global (not per-device). Switching a profile applies it
+to ALL currently active devices via the signal bus.
 """
 
 from __future__ import annotations
@@ -16,27 +16,22 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 if TYPE_CHECKING:
-    from core.signals import AppSignals
+    from core.signals       import AppSignals
     from core.profile_store import ProfileStore
 
 
 class ProfilePanel(QWidget):
-    """
-    Profile list for the active device with CRUD controls.
-    Embedded in the Device tab of the main window.
-    """
+    """Global profile list with CRUD + active-profile switching."""
 
     def __init__(
         self,
         signals: "AppSignals",
-        store: "ProfileStore",
-        plugin_name: str,
+        store:   "ProfileStore",
         parent=None,
     ):
         super().__init__(parent)
-        self._signals   = signals
-        self._store     = store
-        self._plugin_name = plugin_name
+        self._signals = signals
+        self._store   = store
         self._build_ui()
         self._refresh()
         self._connect_signals()
@@ -46,11 +41,11 @@ class ProfilePanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        layout.addWidget(QLabel("Profiles:"))
+        layout.addWidget(QLabel("Profile:"))
 
         self._list = QListWidget()
-        self._list.setMaximumHeight(140)
-        self._list.currentRowChanged.connect(self._on_selection_changed)
+        self._list.setMaximumHeight(120)
+        self._list.currentRowChanged.connect(self._update_buttons)
         self._list.itemDoubleClicked.connect(self._on_double_click)
         layout.addWidget(self._list)
 
@@ -59,15 +54,13 @@ class ProfilePanel(QWidget):
         self._btn_new    = QPushButton("+ New")
         self._btn_dup    = QPushButton("Duplicate")
         self._btn_del    = QPushButton("Delete")
-        self._btn_switch.setToolTip("Apply this profile to the device now")
+        self._btn_switch.setToolTip("Apply this profile to all active devices")
         self._btn_switch.clicked.connect(self._switch_profile)
         self._btn_new.clicked.connect(self._new_profile)
         self._btn_dup.clicked.connect(self._duplicate_profile)
         self._btn_del.clicked.connect(self._delete_profile)
-        btn_row.addWidget(self._btn_switch)
-        btn_row.addWidget(self._btn_new)
-        btn_row.addWidget(self._btn_dup)
-        btn_row.addWidget(self._btn_del)
+        for btn in (self._btn_switch, self._btn_new, self._btn_dup, self._btn_del):
+            btn_row.addWidget(btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -84,22 +77,18 @@ class ProfilePanel(QWidget):
             self._list.addItem(item)
         # Re-select active
         for i in range(self._list.count()):
-            item = self._list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == active:
+            if self._list.item(i).data(Qt.ItemDataRole.UserRole) == active:
                 self._list.setCurrentRow(i)
                 break
         self._list.blockSignals(False)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        has_selection = self._list.currentRow() >= 0
-        active = self._store.get_active_name()
         selected = self._current_name()
-        self._btn_switch.setEnabled(has_selection and selected != active)
-        self._btn_dup.setEnabled(has_selection)
-        self._btn_del.setEnabled(has_selection and self._list.count() > 1)
-
-    # ── Current selection ──────────────────────────────────────────────────────
+        active   = self._store.get_active_name()
+        self._btn_switch.setEnabled(bool(selected) and selected != active)
+        self._btn_dup.setEnabled(bool(selected))
+        self._btn_del.setEnabled(bool(selected) and self._list.count() > 1)
 
     def _current_name(self) -> str | None:
         item = self._list.currentItem()
@@ -107,18 +96,15 @@ class ProfilePanel(QWidget):
 
     # ── Handlers ──────────────────────────────────────────────────────────────
 
-    def _on_selection_changed(self, _row: int) -> None:
-        self._update_buttons()
-
     def _on_double_click(self, item: QListWidgetItem) -> None:
         name = item.data(Qt.ItemDataRole.UserRole)
         if name:
-            self._signals.active_profile_switched.emit(self._plugin_name, name)
+            self._signals.active_profile_switched.emit(name)
 
     def _switch_profile(self) -> None:
         name = self._current_name()
         if name:
-            self._signals.active_profile_switched.emit(self._plugin_name, name)
+            self._signals.active_profile_switched.emit(name)
 
     def _new_profile(self) -> None:
         name, ok = QInputDialog.getText(self, "New Profile", "Profile name:")
@@ -127,7 +113,7 @@ class ProfilePanel(QWidget):
         name = name.strip()
         try:
             self._store.create(name)
-            self._signals.profile_saved.emit(self._plugin_name, name)
+            self._signals.profile_saved.emit(name)
             self._refresh()
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -141,10 +127,9 @@ class ProfilePanel(QWidget):
         )
         if not (ok and name.strip()):
             return
-        name = name.strip()
         try:
-            self._store.duplicate(src, name)
-            self._signals.profile_saved.emit(self._plugin_name, name)
+            self._store.duplicate(src, name.strip())
+            self._signals.profile_saved.emit(name.strip())
             self._refresh()
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -154,15 +139,14 @@ class ProfilePanel(QWidget):
         if not name:
             return
         reply = QMessageBox.question(
-            self, "Delete Profile",
-            f"Delete profile '{name}'?",
+            self, "Delete Profile", f"Delete profile '{name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
             self._store.delete(name)
-            self._signals.profile_deleted.emit(self._plugin_name, name)
+            self._signals.profile_deleted.emit(name)
             self._refresh()
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -170,15 +154,8 @@ class ProfilePanel(QWidget):
     # ── Signal connections ────────────────────────────────────────────────────
 
     def _connect_signals(self) -> None:
-        self._signals.active_profile_switched.connect(self._on_active_switched)
-
-    def _on_active_switched(self, plugin_name: str, profile_name: str) -> None:
-        if plugin_name == self._plugin_name:
-            self._refresh()
-
-    # ── Public ────────────────────────────────────────────────────────────────
-
-    def set_store(self, store: "ProfileStore", plugin_name: str) -> None:
-        self._store = store
-        self._plugin_name = plugin_name
-        self._refresh()
+        # Use profile_changed (emitted after store.set_active) not
+        # active_profile_switched (emitted before) — avoids reading stale state.
+        self._signals.profile_changed.connect(lambda _: self._refresh())
+        self._signals.profile_saved.connect(lambda _: self._refresh())
+        self._signals.profile_deleted.connect(lambda _: self._refresh())

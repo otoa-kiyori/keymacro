@@ -154,33 +154,45 @@ class EvdevTranslator(threading.Thread):
             self._uinput.write(event.type, event.code, event.value)
 
     def _execute_macro(self, macro: str):
+        """
+        Execute a macro token sequence.  Accepts both old (KEY_A, +KEY_A)
+        and new (A, A+, A-) token styles via expand_token().
+        """
+        import sys
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+        from core.macro_token import expand_token, _WAIT_RE
+
         hold_stack: list[int] = []
 
         for tok in macro.split():
-            if tok.startswith('+'):
-                code = ecodes.ecodes.get(tok[1:])
-                if code is not None:
-                    self._uinput.write(ecodes.EV_KEY, code, 1)
-                    self._uinput.syn()
-                    hold_stack.append(code)
+            m = _WAIT_RE.match(tok)
+            if m:
+                time.sleep(int(m.group(1)) / 1000.0)
+                continue
 
-            elif tok.startswith('-'):
-                code = ecodes.ecodes.get(tok[1:])
-                if code is not None and code in hold_stack:
-                    self._uinput.write(ecodes.EV_KEY, code, 0)
-                    self._uinput.syn()
+            expanded = expand_token(tok)
+            if expanded is None:
+                continue
+            action, evdev_name = expanded
+            code = ecodes.ecodes.get(evdev_name)
+            if code is None:
+                continue
+
+            if action == 'down':
+                self._uinput.write(ecodes.EV_KEY, code, 1)
+                self._uinput.syn()
+                hold_stack.append(code)
+            elif action == 'up':
+                self._uinput.write(ecodes.EV_KEY, code, 0)
+                self._uinput.syn()
+                if code in hold_stack:
                     hold_stack.remove(code)
-
-            elif tok.startswith('t') and tok[1:].isdigit():
-                time.sleep(int(tok[1:]) / 1000.0)
-
-            else:
-                code = ecodes.ecodes.get(tok)
-                if code is not None:
-                    self._uinput.write(ecodes.EV_KEY, code, 1)
-                    self._uinput.syn()
-                    self._uinput.write(ecodes.EV_KEY, code, 0)
-                    self._uinput.syn()
+            else:  # tap
+                self._uinput.write(ecodes.EV_KEY, code, 1)
+                self._uinput.syn()
+                self._uinput.write(ecodes.EV_KEY, code, 0)
+                self._uinput.syn()
 
         for code in reversed(hold_stack):
             self._uinput.write(ecodes.EV_KEY, code, 0)

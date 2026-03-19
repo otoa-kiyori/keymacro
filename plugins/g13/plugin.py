@@ -99,6 +99,9 @@ def _write_bind_file(path: Path, profiles: dict[str, dict[str, str]]) -> None:
 class G13Plugin(DevicePlugin):
     """keymacro plugin for the Logitech G13 Gameboard."""
 
+    def __init__(self):
+        self._signals = None   # set by activate()
+
     # ── Identity ──────────────────────────────────────────────────────────────
 
     @property
@@ -152,31 +155,31 @@ class G13Plugin(DevicePlugin):
 
     def apply_profile(self, profile: "ProfileData") -> None:
         """
-        Write the profile's bindings to the bind file and switch via pipe.
+        Write this profile's G13 bindings to the bind file and switch via pipe.
 
-        profile.plugin_data["g13"]["profiles"] contains the full multi-profile
-        bind file state. The profile name to activate is profile.name.
-
-        If plugin_data is absent (new profile), only the active profile's
-        bindings from profile.bindings are written.
+        profile.bindings["g13"] contains {button_id: MacroRef} for G13 buttons.
+        profile.plugin_data["g13"] may contain a full "profiles" dict from the
+        bind file (preserved from a previous read).
         """
-        g13_data = profile.plugin_data.get("g13", {})
+        # Extract only the g13 section of the unified profile
+        g13_bindings = profile.bindings.get("g13", {})
+        g13_data     = profile.plugin_data.get("g13", {})
 
         if "profiles" in g13_data:
-            # Full bind file state stored — write it all
-            profiles_raw = g13_data["profiles"]
-        else:
-            # Build from core bindings — simple key:value dict
-            raw_bindings: dict[str, str] = {}
-            for btn_id, macro_ref in profile.bindings.items():
+            # Full bind file state previously stored — use it, updating active profile
+            profiles_raw = dict(g13_data["profiles"])
+            raw: dict[str, str] = {}
+            for btn_id, macro_ref in g13_bindings.items():
                 if macro_ref.inline_tokens:
-                    # Convert token sequence to g13d bind value
-                    # g13d uses KEY_X+KEY_Y format for combos, not our space-separated format
-                    raw_bindings[btn_id] = _tokens_to_g13d(macro_ref.inline_tokens)
-                elif macro_ref.library_name:
-                    # Can't resolve library references here — skip
-                    pass
-            profiles_raw = {profile.name: raw_bindings, "default": raw_bindings}
+                    raw[btn_id] = _tokens_to_g13d(macro_ref.inline_tokens)
+            profiles_raw[profile.name] = raw
+        else:
+            # Build from keymacro bindings only
+            raw = {}
+            for btn_id, macro_ref in g13_bindings.items():
+                if macro_ref.inline_tokens:
+                    raw[btn_id] = _tokens_to_g13d(macro_ref.inline_tokens)
+            profiles_raw = {profile.name: raw, "default": raw}
 
         try:
             _write_bind_file(BIND_FILE, profiles_raw)
@@ -229,19 +232,24 @@ def _tokens_to_g13d(tokens: list[str]) -> str:
     """
     Convert keymacro token sequence to g13d bind value format.
 
+    Accepts both old (KEY_A, +KEY_A) and new (A, A+) token styles.
+
     g13d uses KEY_LEFTCTRL+KEY_B for modifier combos (not space-separated).
-    Simple single-key taps: KEY_A → KEY_A
-    Modifier combos: +KEY_LEFTCTRL KEY_B -KEY_LEFTCTRL → KEY_LEFTCTRL+KEY_B
+    Releases and waits are dropped — g13d doesn't support them.
+    BTN_* mouse tokens are also dropped (g13d can't fire mouse events).
     """
-    # Filter out hold/release tokens and collect keys in order
+    from core.macro_token import expand_token, _WAIT_RE
     keys: list[str] = []
     for tok in tokens:
-        if tok.startswith('+'):
-            keys.append(tok[1:])
-        elif tok.startswith('-'):
-            pass  # release — skip
-        elif tok.startswith('t'):
-            pass  # wait — g13d doesn't support waits; skip
-        elif tok.startswith('KEY_') or tok.startswith('BTN_'):
-            keys.append(tok)
+        if _WAIT_RE.match(tok):
+            continue  # g13d has no wait support
+        expanded = expand_token(tok)
+        if expanded is None:
+            continue
+        action, evdev_name = expanded
+        if evdev_name.startswith('BTN_'):
+            continue  # g13d can't fire mouse buttons
+        if action in ('down', 'tap'):
+            keys.append(evdev_name)
+        # 'up' / release is implicit in g13d's single-press model — skip
     return "+".join(keys) if keys else ""

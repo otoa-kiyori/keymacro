@@ -8,7 +8,6 @@ button_id is the label string ("LMB", "G9", etc.) for consistency with G13 style
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import QWidget, QPushButton
 
@@ -65,6 +64,30 @@ _ZONE_STYLES = {
     "control_gs": _key_style(COLORS["control_gs"], COLORS["control_gs_border"]),
 }
 
+# Buttons that must never be reassigned (primary mouse clicks).
+# They are shown locked with a distinct style and cannot be clicked.
+_LOCKED_LABELS: dict[str, str] = {
+    "LMB": "LMB\nLeft Click",
+    "RMB": "RMB\nRight Click",
+}
+
+_STYLE_LOCKED = f"""
+    QPushButton {{
+        background-color: #e0e0e0;
+        border: 1px dashed #999999;
+        border-radius: 4px;
+        color: #888888;
+        font-family: 'Courier New', monospace;
+        font-size: 10px;
+        font-weight: 500;
+        padding: 2px;
+    }}
+    QPushButton:disabled {{
+        background-color: #e0e0e0;
+        color: #888888;
+    }}
+"""
+
 
 def _dimmed(style: str) -> str:
     return style.replace(f"color: {COLORS['text']}", f"color: {COLORS['text_dim']}")
@@ -109,21 +132,44 @@ _KEY_POSITIONS = [
 _IDX_TO_LABEL = {pos[1]: pos[0] for pos in _KEY_POSITIONS}
 
 
-@dataclass
-class ButtonAction:
-    kind: str         # "key" | "macro" | "button" | "special" | "none" | "swremap"
-    value: str
-    routing_key: str = ""
+def _format_token_str(token_str: str) -> str:
+    """Compact human-readable summary of a token sequence for button labels."""
+    v = (token_str
+         .replace("+KEY_LEFTCTRL",  "^")
+         .replace("+KEY_LEFTSHIFT", "⇧")
+         .replace("+KEY_LEFTALT",   "⌥")
+         .replace("+KEY_LEFTMETA",  "⊞")
+         .replace("-KEY_LEFTCTRL",  "")
+         .replace("-KEY_LEFTSHIFT", "")
+         .replace("-KEY_LEFTALT",   "")
+         .replace("-KEY_LEFTMETA",  "")
+         .replace("KEY_", ""))
+    # Collapse multiple spaces left by removed tokens
+    import re
+    v = re.sub(r'\s+', '', v).strip()
+    # Compact BTN_* software remaps
+    if "BTN_" in v:
+        tokens = token_str.split()
+        btn_name = next(
+            (t.lstrip("+-").replace("BTN_", "") for t in tokens if "BTN_" in t), "?"
+        )
+        prefix = "".join(
+            "^" if "CTRL" in t else "⇧" if "SHIFT" in t else "⌥" if "ALT" in t else ""
+            for t in tokens if t.startswith("+")
+        )
+        v = f"SW:{prefix}{btn_name}"
+    if len(v) > 9:
+        v = v[:8] + "…"
+    return v
 
 
 class G600Canvas(QWidget):
     """
     Visual G600 layout (690×196 px).
     Click any button → emits signals.button_clicked("g600", label).
-    Call update_bindings(buttons, gshift) to refresh labels.
+    Call update_bindings(bindings) to refresh labels.
 
-    buttons: {btn_idx: ButtonAction}
-    gshift:  show G-Shift layer when True
+    bindings: {label → token_string}  e.g. {"G9": "KEY_A", "LMB": "BTN_LEFT"}
     """
 
     def __init__(self, plugin_name: str, signals: "AppSignals", parent=None):
@@ -140,83 +186,36 @@ class G600Canvas(QWidget):
         for label, idx, x, y, w, h, zone in _KEY_POSITIONS:
             btn = QPushButton(self)
             btn.setGeometry(x, y, w, h)
-            btn.setStyleSheet(_ZONE_STYLES[zone])
-            btn.setToolTip(label)
-            btn.clicked.connect(lambda _c, lbl=label: self._on_click(lbl))
+            if label in _LOCKED_LABELS:
+                btn.setStyleSheet(_STYLE_LOCKED)
+                btn.setText(_LOCKED_LABELS[label])
+                btn.setToolTip(f"{label} — locked (cannot be reassigned)")
+                btn.setEnabled(False)
+            else:
+                btn.setStyleSheet(_ZONE_STYLES[zone])
+                btn.setToolTip(label)
+                btn.clicked.connect(lambda _c, lbl=label: self._on_click(lbl))
             self.buttons[idx] = btn
 
     def _on_click(self, label: str) -> None:
-        self._signals.button_clicked.emit(self._plugin_name, label)
+        if label not in _LOCKED_LABELS:
+            self._signals.button_clicked.emit(self._plugin_name, label)
 
-    def update_bindings(self, btn_map: dict[int, ButtonAction], gshift: bool = False) -> None:
-        self._gshift = gshift
-        for label, normal_idx, _x, _y, _w, _h, zone in _KEY_POSITIONS:
-            btn = self.buttons[normal_idx]
-            effective_zone = self._gs_zone(zone) if gshift else zone
-
-            if gshift and normal_idx != 5:
-                actual_idx = normal_idx + 21
+    def update_bindings(self, bindings: dict[str, str]) -> None:
+        """
+        Update button labels from a {label → token_string} dict.
+        Same format used by G13Canvas and passed by main_window.
+        e.g. {"G9": "KEY_A", "G10": "+KEY_LEFTCTRL KEY_S -KEY_LEFTCTRL"}
+        LMB and RMB are skipped — they are locked to their hardware function.
+        """
+        for label, idx, _x, _y, _w, _h, zone in _KEY_POSITIONS:
+            if label in _LOCKED_LABELS:
+                continue  # never touch locked buttons
+            btn = self.buttons[idx]
+            token_str = bindings.get(label, "")
+            if token_str:
+                btn.setStyleSheet(_ZONE_STYLES[zone])
+                btn.setText(f"{label}\n{_format_token_str(token_str)}")
             else:
-                actual_idx = normal_idx
-
-            action = btn_map.get(actual_idx, ButtonAction("none", ""))
-
-            if gshift and normal_idx == 5:
-                btn.setStyleSheet(_dimmed(_ZONE_STYLES[effective_zone]))
-                btn.setText(f"{label}\nsecond-mode")
-                continue
-
-            if action.kind == "none":
-                btn.setStyleSheet(_dimmed(_ZONE_STYLES[effective_zone]))
-            else:
-                btn.setStyleSheet(_ZONE_STYLES[effective_zone])
-
-            btn.setText(self._short_label(label, action))
-
-    @staticmethod
-    def _gs_zone(zone: str) -> str:
-        if zone == "thumb":   return "thumb_gs"
-        if zone == "control": return "control_gs"
-        return zone
-
-    @staticmethod
-    def _short_label(label: str, action: ButtonAction) -> str:
-        if action.kind == "none":
-            return f"{label}\n—"
-        v = action.value
-        if action.kind in ("key", "macro"):
-            v = (v.replace("+KEY_LEFTCTRL", "^")
-                  .replace("+KEY_LEFTSHIFT", "⇧")
-                  .replace("+KEY_LEFTALT", "⌥")
-                  .replace("+KEY_LEFTMETA", "⊞")
-                  .replace("-KEY_LEFTCTRL", "")
-                  .replace("-KEY_LEFTSHIFT", "")
-                  .replace("-KEY_LEFTALT", "")
-                  .replace("-KEY_LEFTMETA", "")
-                  .replace("KEY_", "")
-                  .strip())
-        elif action.kind == "swremap":
-            tokens = v.split()
-            btn_name = next(
-                (t.lstrip("+-").replace("BTN_", "") for t in tokens if "BTN_" in t), "?"
-            )
-            prefix = ""
-            for t in tokens:
-                if t.startswith("+"):
-                    if "CTRL" in t:    prefix += "^"
-                    elif "SHIFT" in t: prefix += "⇧"
-                    elif "ALT" in t:   prefix += "⌥"
-            v = f"SW:{prefix}{btn_name}"
-        elif action.kind == "special":
-            abbrev = {
-                "profile-cycle-up": "→Prof", "dpi-cycle-up": "→DPI",
-                "dpi-up": "DPI↑", "dpi-down": "DPI↓",
-                "second-mode": "GShift", "disable": "off",
-            }
-            v = abbrev.get(v, v.replace("-", " "))
-        elif action.kind == "button":
-            names = {"1": "LMB", "2": "RMB", "3": "Mid", "4": "Back", "5": "Fwd"}
-            v = names.get(v, f"btn{v}")
-        if len(v) > 9:
-            v = v[:8] + "…"
-        return f"{label}\n{v}"
+                btn.setStyleSheet(_dimmed(_ZONE_STYLES[zone]))
+                btn.setText(f"{label}\n—")

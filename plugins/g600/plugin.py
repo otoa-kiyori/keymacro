@@ -121,6 +121,10 @@ def _ratbag_available() -> bool:
 class G600Plugin(DevicePlugin):
     """keymacro plugin for the Logitech G600 Gaming Mouse."""
 
+    # Buttons that must never be reassigned — they are hardware mouse clicks.
+    # The canvas disables these buttons visually; main_window respects this too.
+    LOCKED_BUTTONS: frozenset[str] = frozenset({"LMB", "RMB"})
+
     def __init__(self):
         self._signals = None
         self._device: str | None = None
@@ -211,38 +215,62 @@ class G600Plugin(DevicePlugin):
         if not self._device:
             raise DeviceError("G600 not found — is it plugged in?")
 
-        g600_data = profile.plugin_data.get("g600", {})
-        hw_slot = int(g600_data.get("hw_slot", 0))
-
-        buttons: dict[str, dict] = g600_data.get("buttons", {})
+        # Hardware settings from plugin_data (DPI, LED, slot)
+        g600_data    = profile.plugin_data.get("g600", {})
+        hw_slot      = int(g600_data.get("hw_slot", 0))
         dpi          = int(g600_data.get("dpi", 1200))
         led_mode     = g600_data.get("led_mode", "on")
         led_color    = g600_data.get("led_color", "ffffff")
         led_duration = int(g600_data.get("led_duration", 2000))
 
-        routing_map: dict[int, str] = {}  # for EvdevTranslator
+        # Button bindings come from profile.bindings["g600"] — label → MacroRef.
+        # This is where the macro editor saves assignments (consistent with G13).
+        g600_bindings = profile.bindings.get("g600", {})
+
+        routing_map: dict[int, str] = {}   # for EvdevTranslator
+        used_routing_keys: set[str] = set()
 
         try:
-            # Write buttons
-            for btn_idx_str, action_dict in buttons.items():
-                btn_idx = int(btn_idx_str)
-                kind    = action_dict.get("kind", "none")
-                value   = action_dict.get("value", "")
-                rkey    = action_dict.get("routing_key", "")
+            # Always restore primary mouse buttons to their correct hardware actions.
+            # A previous session may have remapped them as evdev routing keys.
+            _ratbag(self._device, "profile", str(hw_slot),
+                    "button", "0", "action", "set", "button", "1")   # LMB → BTN_LEFT
+            _ratbag(self._device, "profile", str(hw_slot),
+                    "button", "1", "action", "set", "button", "2")   # RMB → BTN_RIGHT
+            _ratbag(self._device, "profile", str(hw_slot),
+                    "button", "2", "action", "set", "button", "3")   # Mid → BTN_MIDDLE
 
-                args = _build_ratbag_args(kind, value, rkey)
+            for label, macro_ref in g600_bindings.items():
+                if label in self.LOCKED_BUTTONS:
+                    continue   # never overwrite hardware mouse clicks
+                btn_idx = _LABEL_TO_IDX.get(label)
+                if btn_idx is None:
+                    continue   # unknown label — skip
+
+                tokens    = macro_ref.inline_tokens or []
+                token_str = " ".join(tokens)
+
+                # BTN_* tokens require evdev software remap via a routing key
+                has_btn = any(t.lstrip("+-").startswith("BTN_") for t in tokens)
+                if has_btn and _EVDEV_OK:
+                    rkey = self.allocate_routing_key(used_routing_keys)
+                    if rkey:
+                        used_routing_keys.add(rkey)
+                        args = _build_ratbag_args("swremap", token_str, rkey)
+                        try:
+                            from evdev import ecodes
+                            keycode = ecodes.ecodes.get(rkey)
+                            if keycode is not None:
+                                routing_map[keycode] = token_str
+                        except Exception:
+                            pass
+                    else:
+                        args = ["disabled"]
+                else:
+                    args = _build_ratbag_args("macro", token_str)
+
                 _ratbag(self._device, "profile", str(hw_slot),
                         "button", str(btn_idx), "action", "set", *args)
-
-                # Collect software remap entries for translator
-                if kind == "swremap" and rkey and _EVDEV_OK:
-                    try:
-                        from evdev import ecodes
-                        keycode = ecodes.ecodes.get(rkey)
-                        if keycode is not None:
-                            routing_map[keycode] = value
-                    except Exception:
-                        pass
 
             # Write DPI
             _ratbag(self._device, "profile", str(hw_slot), "dpi", "set", str(dpi))
