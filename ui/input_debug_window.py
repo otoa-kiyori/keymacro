@@ -110,6 +110,19 @@ class InputDebugWindow(QDialog):
     def _enter_debug(self) -> None:
         if self._capture is None:
             return
+        if not self._capture.is_alive():
+            err = getattr(self._capture, "error", None) or "Capture thread is not running."
+            self._append_html(
+                f'<span style="color:#cc3333;"><b>⚠ Capture thread is not running</b></span>'
+            )
+            self._append_html(
+                f'<span style="color:#888888;">{err}</span>'
+            )
+            self._append_html(
+                '<span style="color:#888888;"><i>Check that /dev/uinput is accessible '
+                'and udev rules are installed. See README for details.</i></span>'
+            )
+            return
         self._capture.update_routing_map({})
         self._capture.set_debug_mode(True)
         self._capture.set_raw_callback(self._raw_cb)

@@ -89,6 +89,19 @@ class G600Plugin(DevicePlugin):
             self._capture = None
             if signals:
                 signals.plugin_error.emit(self.name, f"G600RawCapture: {e}")
+            return
+
+        # Thread setup (evdev grab, UInput creation, etc.) runs asynchronously.
+        # Check 400 ms later whether _setup() crashed before the event loop started.
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(400, lambda: self._check_capture_health(signals))
+
+    def _check_capture_health(self, signals: "AppSignals") -> None:
+        if self._capture is not None and not self._capture.is_alive():
+            err = self._capture.error or "Capture thread exited unexpectedly."
+            self._capture = None
+            if signals:
+                signals.plugin_error.emit(self.name, f"Capture failed: {err}")
 
     def deactivate(self) -> None:
         if self._capture is not None:

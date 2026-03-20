@@ -85,12 +85,17 @@ Raw device access requires a udev rule so you don't need to run as root.
 Create `/etc/udev/rules.d/99-keymacro.rules`:
 
 ```
+# Virtual input device (required by both plugins to emit key events)
+KERNEL=="uinput", GROUP="input", MODE="0660"
+
 # Logitech G600
 SUBSYSTEM=="input", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c24a", GROUP="input", MODE="0664"
 
 # Logitech G13
 SUBSYSTEM=="usb", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c21c", GROUP="plugdev", MODE="0664"
 ```
+
+> **Note:** The `uinput` rule is the most commonly missed one. Both plugins create a virtual keyboard/mouse via `/dev/uinput` to emit macro keystrokes. Without this rule the capture thread will start, appear to succeed, but silently exit — the device buttons will be captured but no macros will fire, and the Debug Window will show no events.
 
 Then reload udev and re-plug your device:
 ```bash

@@ -234,7 +234,14 @@ class PluginPanel(QWidget):
         if plugin is None:
             return
         capture = plugin._get_capture()
-        if capture is None:
+        if capture is None or not capture.is_alive():
+            from PyQt6.QtWidgets import QMessageBox
+            err = (getattr(capture, "error", None) or "Capture thread is not running.")
+            QMessageBox.warning(
+                self,
+                "Capture Not Running",
+                f"The capture thread for {plugin.display_name} is not active.\n\n{err}",
+            )
             return
 
         win = InputDebugWindow(
