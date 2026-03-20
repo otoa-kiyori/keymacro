@@ -5,19 +5,28 @@
 #   bash scripts/install-udev-rules.sh
 #
 # What it does:
-#   1. Copies udev/99-keymacro.rules to /etc/udev/rules.d/
-#   2. Reloads udev rules and triggers them for connected devices
-#   3. Loads the uinput kernel module and makes it persistent across reboots
+#   1. Installs udev/99-keymacro.rules (core — uinput)
+#   2. Installs each plugin's own rules file (plugins/*/99-keymacro-*.rules)
+#   3. Reloads udev and triggers rules for connected devices
+#   4. Loads the uinput kernel module and makes it persistent across reboots
 
 set -euo pipefail
 
-RULES_SRC="$(cd "$(dirname "$0")/.." && pwd)/udev/99-keymacro.rules"
-RULES_DST="/etc/udev/rules.d/99-keymacro.rules"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+RULES_DST_DIR="/etc/udev/rules.d"
 MODULES_FILE="/etc/modules-load.d/keymacro.conf"
 
-echo "==> Installing udev rules..."
-sudo install -m 644 "$RULES_SRC" "$RULES_DST"
-echo "    Installed: $RULES_DST"
+echo "==> Installing core udev rules..."
+sudo install -m 644 "$REPO_ROOT/udev/99-keymacro.rules" "$RULES_DST_DIR/"
+echo "    Installed: $RULES_DST_DIR/99-keymacro.rules"
+
+echo "==> Installing plugin udev rules..."
+for rules_file in "$REPO_ROOT"/plugins/*/99-keymacro-*.rules; do
+    [ -f "$rules_file" ] || continue
+    filename="$(basename "$rules_file")"
+    sudo install -m 644 "$rules_file" "$RULES_DST_DIR/"
+    echo "    Installed: $RULES_DST_DIR/$filename"
+done
 
 echo "==> Reloading udev rules..."
 sudo udevadm control --reload-rules

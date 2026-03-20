@@ -1,0 +1,14 @@
+# keymacro — Logitech G13 Advanced Gameboard udev rules
+#
+# Grants raw USB access to members of the 'plugdev' group,
+# so the G13 plugin can communicate via pyusb without root.
+#
+# Install with:
+#   bash scripts/install-udev-rules.sh
+#
+# Group membership required:
+#   sudo usermod -aG plugdev $USER
+#   Then log out and back in.
+
+# Logitech G13 Advanced Gameboard — raw USB access (G13 plugin)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c21c", GROUP="plugdev", MODE="0660"
