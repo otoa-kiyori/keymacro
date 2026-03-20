@@ -20,10 +20,7 @@ Plugin contract (DevicePlugin ABC):
 
 from __future__ import annotations
 
-import glob
 import importlib.util
-import os
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -142,43 +139,8 @@ class DevicePlugin(ABC):
         """
         Hardware-level USB reset hook.  Called by reset() between deactivate()
         and activate().  Default is a no-op (pure soft reset).
-        Override in plugin subclass and call _usb_reset_by_id() as needed.
+        Override in plugin subclass to add device-specific USB cycling.
         """
-
-    @staticmethod
-    def _usb_reset_by_id(vendor_id: int, product_id: int,
-                         settle: float = 1.5) -> bool:
-        """
-        USB hard reset via sysfs authorized: deauthorize → sleep → authorize.
-
-        Scans /sys/bus/usb/devices/ for the device matching vendor_id/product_id
-        and writes 0 then 1 to its 'authorized' file.  Returns True if the
-        device was found and reset.
-
-        Note: writing to 'authorized' typically requires elevated privileges.
-        Add a udev rule (TAG+="uaccess") or a sudoers NOPASSWD entry to allow
-        this without a password.
-        """
-        for vendor_path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
-            try:
-                dev_dir = os.path.dirname(vendor_path)
-                with open(vendor_path) as f:
-                    if f.read().strip() != f"{vendor_id:04x}":
-                        continue
-                with open(os.path.join(dev_dir, "idProduct")) as f:
-                    if f.read().strip() != f"{product_id:04x}":
-                        continue
-                auth_path = os.path.join(dev_dir, "authorized")
-                with open(auth_path, "w") as f:
-                    f.write("0")
-                time.sleep(settle)
-                with open(auth_path, "w") as f:
-                    f.write("1")
-                time.sleep(settle)
-                return True
-            except Exception:
-                continue
-        return False
 
     # ── Device semantics ──────────────────────────────────────────────────────
 

@@ -13,7 +13,7 @@ set -euo pipefail
 
 RULES_SRC="$(cd "$(dirname "$0")/.." && pwd)/udev/99-keymacro.rules"
 RULES_DST="/etc/udev/rules.d/99-keymacro.rules"
-MODULES_FILE="/etc/modules-load.d/uinput.conf"
+MODULES_FILE="/etc/modules-load.d/keymacro.conf"
 
 echo "==> Installing udev rules..."
 sudo install -m 644 "$RULES_SRC" "$RULES_DST"

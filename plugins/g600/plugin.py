@@ -110,9 +110,6 @@ class G600Plugin(DevicePlugin):
             self._capture.join(timeout=2.0)   # wait for _teardown() to close evdev fds
             self._capture = None
 
-    def _hw_reset(self) -> None:
-        self._usb_reset_by_id(0x046d, 0xc24a)
-
     def get_button_specs(self) -> list[ButtonSpec]:
         return list(_G600_BUTTON_SPECS)
 

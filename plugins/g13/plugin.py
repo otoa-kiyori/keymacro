@@ -171,7 +171,13 @@ class G13Plugin(DevicePlugin):
             self._capture = None
 
     def _hw_reset(self) -> None:
-        self._usb_reset_by_id(0x046d, 0xc21c)
+        try:
+            import usb.core
+            dev = usb.core.find(idVendor=0x046d, idProduct=0xc21c)
+            if dev is not None:
+                dev.reset()
+        except Exception:
+            pass
 
     # ── Device semantics ──────────────────────────────────────────────────────
 
