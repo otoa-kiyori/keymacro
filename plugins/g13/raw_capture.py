@@ -162,7 +162,7 @@ class G13RawCapture(threading.Thread):
         usb.util.claim_interface(self._dev, G13_IFACE)
 
         # Single non-blocking attempt at startup; the event loop retries every
-        # _UINPUT_RETRY_S seconds.  ensure_capture() (10 retries × 1 s) is
+        # _UINPUT_RETRY_S seconds.  ensure_capture() (8 retries × 0.5 s) is
         # available for callers that want to block-wait (e.g. the debug script).
         self._try_create_uinput()
         if self._uinput is not None:
@@ -172,23 +172,23 @@ class G13RawCapture(threading.Thread):
                   "Run: sudo modprobe uinput", flush=True)
 
     def ensure_capture(self) -> None:
-        """Block-wait for UInput: retry up to 10 times with 1 s sleep between
+        """Block-wait for UInput: retry up to 8 times with 0.5 s sleep between
         attempts, then log success or final failure to stdout.
 
         Intended for standalone scripts (debug_g13.py) that want to wait for
         UInput to become ready.  The plugin itself uses the non-blocking
         event-loop retry instead.
         """
-        for attempt in range(1, 11):
+        for attempt in range(1, 9):
             self._try_create_uinput()
             if self._uinput is not None:
-                print(f"[G13] UInput ready (attempt {attempt}/10)", flush=True)
+                print(f"[G13] UInput ready (attempt {attempt}/8)", flush=True)
                 return
-            print(f"[G13] UInput not ready (attempt {attempt}/10) — "
-                  "retrying in 1 s...", flush=True)
-            if attempt < 10:
-                time.sleep(1.0)
-        print("[G13] UInput unavailable after 10 attempts — "
+            print(f"[G13] UInput not ready (attempt {attempt}/8) — "
+                  "retrying in 0.5 s...", flush=True)
+            if attempt < 8:
+                time.sleep(0.5)
+        print("[G13] UInput unavailable after 8 attempts — "
               "macros disabled.  Run: sudo modprobe uinput", flush=True)
 
     def _try_create_uinput(self) -> None:
