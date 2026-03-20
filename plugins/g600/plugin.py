@@ -98,8 +98,9 @@ class G600Plugin(DevicePlugin):
 
     def _check_capture_health(self, signals: "AppSignals") -> None:
         if self._capture is not None and not self._capture.is_alive():
-            err = self._capture.error or "Capture thread exited unexpectedly."
-            self._capture = None
+            err = self._capture.error or "Capture thread exited unexpectedly (no error recorded)."
+            # Do NOT clear self._capture — preserve it so _get_capture() still
+            # returns the dead thread and its .error is visible in the debug dialog.
             if signals:
                 signals.plugin_error.emit(self.name, f"Capture failed: {err}")
 
