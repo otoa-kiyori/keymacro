@@ -1,0 +1,20 @@
+# keymacro udev rules
+#
+# Install:
+#   sudo install -m 644 udev/99-keymacro.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   (or run: scripts/install-udev-rules.sh)
+#
+# Group membership required:
+#   sudo usermod -aG input,plugdev $USER
+#   Then log out and back in.
+
+# /dev/uinput — virtual input device creation (needed by both plugins)
+KERNEL=="uinput", GROUP="input", MODE="0660"
+
+# Logitech G600 Gaming Mouse — evdev interfaces (G600 plugin)
+SUBSYSTEM=="input", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c24a", GROUP="input", MODE="0660"
+
+# Logitech G13 Advanced Gameboard — raw USB access (G13 plugin)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c21c", GROUP="plugdev", MODE="0660"

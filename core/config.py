@@ -33,9 +33,13 @@ KEY_REFERENCE_CSV  = Path(__file__).parent / "key_reference.csv"
 
 
 def ensure_dirs() -> None:
-    """Create data and config directories if they don't exist yet."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    """Create data and config directories if they don't exist yet.
+
+    Directories are created with mode 0o700 (user-only) so profiles and
+    macros are not readable by other local accounts.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 
 
 def get_settings() -> QSettings:

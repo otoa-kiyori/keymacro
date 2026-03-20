@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=keymacro
+Comment=Key mapping and macros for gaming peripherals
+# Edit Exec to match your actual install path before copying:
+Exec=/path/to/keymacro/.venv/bin/python /path/to/keymacro/keymacro.py
+Icon=input-gaming
+Hidden=false
+X-KDE-AutostartEnabled=true
+X-KDE-autostart-phase=2
