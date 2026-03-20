@@ -179,3 +179,9 @@ keymacro/
 │   └── README.md        # Plugin authoring guide
 └── storage/             # Runtime data lives at ~/.keymacro/ (not here)
 ```
+
+---
+
+## Credits
+
+README and codebase documentation written with the assistance of [Claude Sonnet 4.6](https://www.anthropic.com/claude) by Anthropic.
