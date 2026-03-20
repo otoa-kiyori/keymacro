@@ -17,13 +17,25 @@ import json
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QThreadPool, QRunnable, QObject, pyqtSignal, QTimer
 
+# Resource classes that belong to transient / system UI — gaining focus from
+# one of these should NOT alter the active profile.  Treated identically to
+# keymacro's own window (OWN_CLASSES in WindowWatcher).
+_TRANSIENT_CLASSES: frozenset[str] = frozenset({
+    "plasmashell",    # KDE panels, desktop, notification popups
+    "krunner",        # KDE application launcher
+    "ksmserver",      # KDE session-manager dialogs
+    "kwin_wayland",   # internal KWin compositor UI
+    "latte-dock",     # Latte Dock (if used)
+    "lattedock",
+})
+
 from core.signals        import AppSignals
 from core.plugin_manager import PluginManager
 from core.macro_library  import MacroLibrary
 from core.profile_store  import ProfileStore
 from core.program_map    import ProgramProfileMap
 from core.window_watcher import WindowWatcher
-from core.config         import get_settings
+from core.config         import get_settings, KEY_REFERENCE_CSV
 
 
 class _ApplyProfileRunnable(QRunnable):
@@ -33,16 +45,17 @@ class _ApplyProfileRunnable(QRunnable):
         error = pyqtSignal(str, str)   # plugin_name, message
         done  = pyqtSignal(str, str)   # plugin_name, profile_name
 
-    def __init__(self, plugin, profile, app_signals: AppSignals):
+    def __init__(self, plugin, profile, app_signals: AppSignals, library=None):
         super().__init__()
         self._plugin       = plugin
         self._profile      = profile
         self._app_signals  = app_signals
+        self._library      = library
         self.signals       = self._Signals()
 
     def run(self):
         try:
-            self._plugin.apply_profile(self._profile)
+            self._plugin.apply_profile(self._profile, self._library)
             self.signals.done.emit(self._plugin.name, self._profile.name)
         except Exception as e:
             self.signals.error.emit(self._plugin.name, str(e))
@@ -87,6 +100,14 @@ class KMApp:
 
     def start(self) -> None:
         self.macro_library.load_from_disk()
+        self.macro_library.load_builtins(KEY_REFERENCE_CSV)
+
+        # Give the shared execution queue a reference to the library so that
+        # composite (meta) macro tokens like "Plus+" or "DoubleQuote-" are
+        # expanded into their constituent evdev tokens at execution time.
+        from core.macro_queue import get_queue
+        get_queue().set_library(self.macro_library)
+
         self.plugin_manager.discover()
         self.store.load_from_disk()
 
@@ -213,25 +234,33 @@ class KMApp:
     # ── Profile apply ─────────────────────────────────────────────────────────
 
     def _apply_profile(self, profile_name: str) -> None:
-        """Switch to a profile and apply it to ALL active plugins."""
+        """Switch to a profile and apply it to ALL active plugins.
+
+        If the requested profile is already active the routing is still
+        re-applied (needed e.g. after debug mode clears it) but no UI
+        notification is emitted — the user sees nothing.
+        """
         profile = self.store.get(profile_name)
         if profile is None:
             self.signals.plugin_error.emit("", f"Profile '{profile_name}' not found")
             return
 
+        is_new = profile_name != self.store.get_active_name()
         self.store.set_active(profile_name)
-        # Emit profile_changed NOW (after store update) so the UI reads the
-        # correct active profile — must come before _apply_to_plugin threads start.
-        self.signals.profile_changed.emit(profile_name)
+
+        # Only tell the UI something changed when we're actually switching.
+        if is_new:
+            self.signals.profile_changed.emit(profile_name)
 
         for plugin in list(self._active_plugins.values()):
             self._apply_to_plugin(plugin, profile)
 
+        # One status message from core — not one per plugin.
+        if is_new:
+            self.signals.status_message.emit(f"Profile: {profile_name}")
+
     def _apply_to_plugin(self, plugin, profile) -> None:
-        runnable = _ApplyProfileRunnable(plugin, profile, self.signals)
-        runnable.signals.done.connect(
-            lambda pn, prn: self.signals.status_message.emit(f"[{pn}] Profile applied: {prn}")
-        )
+        runnable = _ApplyProfileRunnable(plugin, profile, self.signals, self.macro_library)
         runnable.signals.error.connect(
             lambda pn, err: self.signals.plugin_error.emit(pn, err)
         )
@@ -276,11 +305,23 @@ class KMApp:
         """Auto-switch profile based on the active window's resource class."""
         if not self._active_plugins:
             return
-        # Ignore focus events for our own window
+        # Ignore keymacro's own windows
         if self.window_watcher.is_own_class(resource_class):
             return
+        # Ignore empty class (desktop/no-window) and transient system UI
+        # (notifications, panels, launchers).  Neither should alter the profile.
+        if not resource_class or resource_class.lower() in _TRANSIENT_CLASSES:
+            return
 
-        target = self.program_map.get_profile_for(resource_class) if resource_class else None
+        # Check associated_apps on profiles first (new format), then fall back
+        # to the legacy ProgramProfileMap.
+        target: str | None = None
+        if resource_class:
+            profile_match = self.store.find_by_app(resource_class)
+            if profile_match:
+                target = profile_match.name
+            else:
+                target = self.program_map.get_profile_for(resource_class)
 
         if target and self.store.get(target):
             # Known mapped app — cancel any pending Default fallback and switch now

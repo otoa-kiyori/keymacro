@@ -98,4 +98,4 @@ except ImportError:
 
 - In `is_available()`, return False if required deps are missing.
 - In `get_install_hint()`, explain how to install them.
-- **Never** import evdev, libratbag, or other device libs in `core/` or `ui/`.
+- **Never** import evdev, pyusb, or other device libs in `core/` or `ui/`.

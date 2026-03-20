@@ -9,6 +9,7 @@ Tabbed layout:
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from PyQt6.QtWidgets import (
@@ -58,7 +59,7 @@ class MainWindow(QMainWindow):
         self._canvases: dict[str, QWidget] = {}  # plugin_name → canvas widget
         self._device_tab_widget: QWidget | None = None
 
-        self.setWindowTitle("keymacro")
+        self._update_title(store.get_active_name())
         self.setMinimumSize(760, 520)
 
         self._status = QStatusBar()
@@ -114,9 +115,8 @@ class MainWindow(QMainWindow):
                     # Populate labels from the current active profile immediately
                     profile = self._store.get_active()
                     if hasattr(canvas, "update_bindings"):
-                        plugin_bindings = profile.bindings.get(plugin_name, {}) if profile else {}
-                        raw = {k: " ".join(v.inline_tokens or []) for k, v in plugin_bindings.items()}
-                        canvas.update_bindings(raw)
+                        plugin_bindings = profile.bindings.get(plugin_name, {}) if profile is not None else {}
+                        canvas.update_bindings(self._binding_labels(plugin_bindings))
                     canvas_row.addWidget(canvas)
                 except Exception as e:
                     canvas_row.addWidget(QLabel(f"Canvas error: {e}"))
@@ -171,7 +171,7 @@ class MainWindow(QMainWindow):
     # ── Tab: Plugins ──────────────────────────────────────────────────────────
 
     def _build_plugins_tab(self) -> None:
-        panel = PluginPanel(self._signals, self._pm, self._active_plugins)
+        panel = PluginPanel(self._signals, self._pm, self._active_plugins, self._store)
         self._tabs.addTab(panel, "Plugins")
 
     # ── Tab: Programs ─────────────────────────────────────────────────────────
@@ -190,9 +190,17 @@ class MainWindow(QMainWindow):
         self._signals.plugin_activated.connect(self._on_plugin_activated)
         self._signals.plugin_deactivated.connect(self._on_plugin_deactivated)
         self._signals.active_profile_switched.connect(self._on_profile_switched)
+        self._signals.profile_changed.connect(self._update_title)
         self._signals.status_message.connect(self._on_status_message)
         self._signals.plugin_error.connect(self._on_plugin_error)
         self._signals.button_clicked.connect(self._on_button_clicked)
+        self._signals.device_reset.connect(self._on_device_reset)
+
+    def _update_title(self, profile_name: str | None) -> None:
+        if not profile_name or profile_name == "Default":
+            self.setWindowTitle("KeyMacro")
+        else:
+            self.setWindowTitle(f"KM: {profile_name}")
 
     def _on_plugin_activated(self, plugin_name: str) -> None:
         self._rebuild_device_tab()
@@ -208,11 +216,7 @@ class MainWindow(QMainWindow):
             for plugin_name, canvas in self._canvases.items():
                 if hasattr(canvas, "update_bindings"):
                     plugin_bindings = profile.bindings.get(plugin_name, {})
-                    raw = {
-                        k: " ".join(v.inline_tokens or [])
-                        for k, v in plugin_bindings.items()
-                    }
-                    canvas.update_bindings(raw)
+                    canvas.update_bindings(self._binding_labels(plugin_bindings))
 
     def _on_status_message(self, msg: str) -> None:
         if msg == "open_window":
@@ -222,16 +226,33 @@ class MainWindow(QMainWindow):
         else:
             self._status.showMessage(msg, 4000)
 
+    def _on_device_reset(self, plugin_name: str) -> None:
+        plugin = self._active_plugins.get(plugin_name)
+        if plugin is None:
+            return
+        self._status.showMessage(f"Resetting {plugin_name}…", 0)
+
+        def _worker() -> None:
+            try:
+                plugin.reset()
+                self._signals.status_message.emit(f"{plugin_name} reset OK")
+            except Exception as e:
+                self._signals.plugin_error.emit(plugin_name, f"Reset failed: {e}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _on_plugin_error(self, plugin_name: str, error: str) -> None:
         self._status.showMessage(f"[{plugin_name}] {error}", 6000)
 
     def _on_button_clicked(self, plugin_name: str, button_id: str) -> None:
         """Open a button edit dialog when a canvas button is clicked."""
-        if plugin_name not in self._active_plugins:
+        # Re-check plugin is still active — it may have been deactivated after
+        # the canvas was built but before the button was clicked.
+        plugin = self._active_plugins.get(plugin_name)
+        if plugin is None:
             return
         # Refuse to edit hardware-locked buttons (e.g. G600 LMB / RMB)
-        plugin = self._active_plugins[plugin_name]
-        locked: set[str] = getattr(plugin, "LOCKED_BUTTONS", set())
+        locked: set[str] = getattr(plugin, "LOCKED_BUTTONS", set())  # type: ignore[assignment]
         if button_id in locked:
             return
         profile = self._store.get_active()
@@ -239,50 +260,61 @@ class MainWindow(QMainWindow):
             return
         self._open_button_edit(plugin_name, button_id, profile)
 
+    def _binding_labels(self, plugin_bindings: dict) -> dict[str, str]:
+        """Produce {button_id: display_label} from a plugin's binding dict.
+
+        The label is the macro's display_name (falling back to its name).
+        Buttons with no binding or whose macro was deleted are omitted.
+        """
+        labels: dict[str, str] = {}
+        for btn_id, ref in plugin_bindings.items():
+            if ref and ref.macro_name:
+                macro = self._macro_library.get(ref.macro_name)
+                if macro:
+                    labels[btn_id] = macro.display_name or macro.name
+                else:
+                    labels[btn_id] = f"? {ref.macro_name}"  # macro deleted
+        return labels
+
     def _open_button_edit(self, plugin_name: str, button_id: str, profile) -> None:
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox, QLabel
-        from ui.macro_editor import MacroEditorWidget
+        """Open the full macro editor/picker dialog to assign a macro to a button."""
+        from PyQt6.QtWidgets import QDialog
+        from ui.macro_assign_dialog import MacroAssignDialog
         from core.profile_store import MacroRef
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Edit button: {button_id}")
-        dlg.setMinimumWidth(500)
-        layout = QVBoxLayout(dlg)
-
-        layout.addWidget(QLabel(f"Plugin: <b>{plugin_name}</b>  Button: <b>{button_id}</b>"))
-        layout.addWidget(QLabel("Token sequence (leave empty to unbind):"))
-
-        editor = MacroEditorWidget()
         plugin_bindings = profile.bindings.get(plugin_name, {})
-        ref = plugin_bindings.get(button_id)
-        if ref and ref.inline_tokens:
-            editor.set_tokens(ref.inline_tokens)
-        layout.addWidget(editor)
+        current_ref = plugin_bindings.get(button_id)
+        current_name = current_ref.macro_name if current_ref else ""
 
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        dlg = MacroAssignDialog(
+            signals            = self._signals,
+            library            = self._macro_library,
+            plugin_name        = plugin_name,
+            button_id          = button_id,
+            current_macro_name = current_name,
+            parent             = self,
         )
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
 
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            tokens = editor.get_tokens()
-            nested = profile.bindings.setdefault(plugin_name, {})
-            if tokens:
-                nested[button_id] = MacroRef(inline_tokens=tokens)
-            else:
-                nested.pop(button_id, None)
-            self._store.save(profile)
-            self._signals.profile_saved.emit(profile.name)
-            # Refresh canvas labels for this plugin
-            canvas = self._canvases.get(plugin_name)
-            if canvas and hasattr(canvas, "update_bindings"):
-                raw = {
-                    k: " ".join(v.inline_tokens or [])
-                    for k, v in nested.items()
-                }
-                canvas.update_bindings(raw)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        nested = profile.bindings.setdefault(plugin_name, {})
+        name = dlg.result_name
+        if name:
+            nested[button_id] = MacroRef(macro_name=name)
+        else:
+            nested.pop(button_id, None)
+
+        self._store.save(profile)
+        self._signals.profile_saved.emit(profile.name)
+
+        # Re-apply profile so the capture thread picks up the new routing
+        self._signals.active_profile_switched.emit(profile.name)
+
+        # Refresh canvas labels for this plugin
+        canvas = self._canvases.get(plugin_name)
+        if canvas and hasattr(canvas, "update_bindings"):
+            canvas.update_bindings(self._binding_labels(nested))
 
     # ── Geometry persistence ──────────────────────────────────────────────────
 

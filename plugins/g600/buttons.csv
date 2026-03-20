@@ -1,0 +1,42 @@
+# G600 button definitions — single source of truth for signal detection and UI.
+#
+# Columns:
+#   button_id    unique key used in profiles and routing maps
+#   label        display name shown in UI
+#   device       which evdev interface:
+#                  mouse    = event-mouse        (EV_KEY, standard mouse buttons)
+#                  kbd      = if01-event-kbd     (EV_KEY, Piper-remapped thumb/ring keys)
+#                  if01     = event-if01         (EV_ABS, hardware bitmask, axis code 40)
+#   ev_type      Linux input event type  (1=EV_KEY, 3=EV_ABS)
+#   ev_code      event code (key/axis number)
+#   press_value  EV_KEY: value==1 means pressed
+#                EV_ABS: bitmask to AND against event.value; non-zero = pressed
+#   release_value  EV_KEY: value==0 means released
+#                  EV_ABS: bitmask clears (new & mask == 0)
+#   locked       true = never reassignable (hardware primary clicks)
+#   zone         UI grouping hint: main / thumb / control
+#
+# Confirmed by hardware discovery 2026-03-19 (three-interface evdev dump).
+# if01 bitmask axis=40 confirmed values: GS=32 (bit5).
+# kbd codes reflect Piper onboard-flash remapping as of 2026-03-19.
+button_id,device,ev_type,ev_code,press_value,release_value,locked,zone
+LMB,event-mouse,1,272,1,0,true,main
+RMB,event-mouse,1,273,1,0,true,main
+Mid,event-mouse,1,274,1,0,false,main
+Back,if01-event-kbd,1,192,1,0,false,main
+Fwd,if01-event-kbd,1,193,1,0,false,main
+GS,event-if01,3,40,32,0,false,control
+G7,if01-event-kbd,1,48,1,0,false,main
+G8,if01-event-kbd,1,11,1,0,false,main
+G9,if01-event-kbd,1,2,1,0,false,thumb
+G10,if01-event-kbd,1,3,1,0,false,thumb
+G11,if01-event-kbd,1,4,1,0,false,thumb
+G12,if01-event-kbd,1,75,1,0,false,thumb
+G13,if01-event-kbd,1,76,1,0,false,thumb
+G14,if01-event-kbd,1,77,1,0,false,thumb
+G15,if01-event-kbd,1,71,1,0,false,thumb
+G16,if01-event-kbd,1,72,1,0,false,thumb
+G17,if01-event-kbd,1,73,1,0,false,thumb
+G18,if01-event-kbd,1,82,1,0,false,thumb
+G19,if01-event-kbd,1,78,1,0,false,thumb
+G20,if01-event-kbd,1,74,1,0,false,thumb

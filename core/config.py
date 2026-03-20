@@ -8,21 +8,33 @@ from PyQt6.QtCore import QSettings, QStandardPaths
 APP_NAME  = "keymacro"
 ORG_NAME  = "otoa-kiyori"
 
-# ~/.config/keymacro/
+# ~/.keymacro/  — user-visible data directory in home folder
+DATA_DIR  = Path.home() / ".keymacro"
+
+# ~/.config/keymacro/  — app settings (window geometry, active plugin, etc.)
 CONFIG_DIR = Path(
     QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.AppConfigLocation
     )
 )
 
-MACROS_FILE    = CONFIG_DIR / "macros.json"
-PROFILES_FILE  = CONFIG_DIR / "profiles.json"   # single global profile store
-PROGRAMS_FILE  = CONFIG_DIR / "programs.json"   # program → profile mapping
-SETTINGS_FILE  = CONFIG_DIR / "settings.ini"
+MACROS_FILE    = DATA_DIR  / "macros.yaml"
+PROFILES_FILE  = DATA_DIR  / "profiles.yaml"
+PROGRAMS_FILE  = DATA_DIR  / "programs.yaml"
+
+# Legacy JSON paths — used only for one-time migration on first load
+_MACROS_JSON   = DATA_DIR  / "macros.json"
+_PROFILES_JSON = DATA_DIR  / "profiles.json"
+_PROGRAMS_JSON = DATA_DIR  / "programs.json"
+SETTINGS_FILE      = CONFIG_DIR / "settings.ini"
+
+# Built-in single-key reference — same directory as this file
+KEY_REFERENCE_CSV  = Path(__file__).parent / "key_reference.csv"
 
 
 def ensure_dirs() -> None:
-    """Create config directories if they don't exist yet."""
+    """Create data and config directories if they don't exist yet."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 

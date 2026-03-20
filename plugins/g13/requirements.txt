@@ -1,3 +1,5 @@
-# G13 plugin — no extra Python dependencies.
-# Requires: ecraven/g13 userspace driver (g13d) installed and running as a systemd service.
-# See: https://github.com/ecraven/g13
+# G13 plugin dependencies
+# Install via: pip install pyusb evdev
+# or:          sudo apt install python3-usb python3-evdev
+pyusb
+evdev

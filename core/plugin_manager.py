@@ -12,15 +12,20 @@ Plugin discovery:
 Plugin contract (DevicePlugin ABC):
   - Identity:    name, display_name, description
   - Availability: is_available(), get_install_hint()
-  - Lifecycle:   activate(signals), deactivate()
-  - Device:      get_button_ids(), get_device_profile(), apply_profile()
+  - Lifecycle:   activate(signals), deactivate(), _get_capture()
+  - Device:      get_button_specs(), get_device_profile()
+  - Profile:     apply_profile() — provided by base class; no override needed
   - UI:          create_canvas(), create_settings_widget() [optional]
 """
 
 from __future__ import annotations
 
+import glob
 import importlib.util
+import os
+import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,8 +34,20 @@ from PyQt6.QtWidgets import QWidget
 if TYPE_CHECKING:
     from core.signals import AppSignals
     from core.profile_store import ProfileData
+    from core.macro_library import MacroLibrary, NamedMacro
 
 PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
+
+
+# ─── Button spec ──────────────────────────────────────────────────────────────
+
+@dataclass
+class ButtonSpec:
+    """Metadata for a single physical button exposed by a plugin."""
+    id: str                         # unique key: "G9", "LMB", "STICK_UP"
+    locked: bool = False            # True = never reassignable (e.g. LMB, RMB)
+    supports_release: bool = False  # True = separate release macro supported
+    zone: str = "default"           # visual grouping: "thumb", "main", "control"
 
 
 # ─── Exceptions ───────────────────────────────────────────────────────────────
@@ -108,14 +125,73 @@ class DevicePlugin(ABC):
         Must not raise.
         """
 
+    def reset(self) -> None:
+        """
+        Full device reset: deactivate capture → hardware USB reset → re-activate.
+
+        Plugins override _hw_reset() to add USB-level cycling.  The default
+        performs a pure soft reset (stop + restart capture, no USB cycle).
+        """
+        signals = getattr(self, "_signals", None)
+        self.deactivate()
+        self._hw_reset()
+        if signals is not None:
+            self.activate(signals)
+
+    def _hw_reset(self) -> None:
+        """
+        Hardware-level USB reset hook.  Called by reset() between deactivate()
+        and activate().  Default is a no-op (pure soft reset).
+        Override in plugin subclass and call _usb_reset_by_id() as needed.
+        """
+
+    @staticmethod
+    def _usb_reset_by_id(vendor_id: int, product_id: int,
+                         settle: float = 1.5) -> bool:
+        """
+        USB hard reset via sysfs authorized: deauthorize → sleep → authorize.
+
+        Scans /sys/bus/usb/devices/ for the device matching vendor_id/product_id
+        and writes 0 then 1 to its 'authorized' file.  Returns True if the
+        device was found and reset.
+
+        Note: writing to 'authorized' typically requires elevated privileges.
+        Add a udev rule (TAG+="uaccess") or a sudoers NOPASSWD entry to allow
+        this without a password.
+        """
+        for vendor_path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+            try:
+                dev_dir = os.path.dirname(vendor_path)
+                with open(vendor_path) as f:
+                    if f.read().strip() != f"{vendor_id:04x}":
+                        continue
+                with open(os.path.join(dev_dir, "idProduct")) as f:
+                    if f.read().strip() != f"{product_id:04x}":
+                        continue
+                auth_path = os.path.join(dev_dir, "authorized")
+                with open(auth_path, "w") as f:
+                    f.write("0")
+                time.sleep(settle)
+                with open(auth_path, "w") as f:
+                    f.write("1")
+                time.sleep(settle)
+                return True
+            except Exception:
+                continue
+        return False
+
     # ── Device semantics ──────────────────────────────────────────────────────
 
     @abstractmethod
+    def get_button_specs(self) -> list[ButtonSpec]:
+        """
+        Return metadata for every physical button this device exposes.
+        Locked buttons (e.g. LMB, RMB) are included but never routed.
+        """
+
     def get_button_ids(self) -> list[str]:
-        """
-        Return the list of button identifiers this device exposes.
-        e.g. ['G1', 'G2', ..., 'G22', 'M1', 'M2', 'M3', 'MR', 'L1', ...]
-        """
+        """Convenience: return just the id strings from get_button_specs()."""
+        return [s.id for s in self.get_button_specs()]
 
     @abstractmethod
     def get_device_profile(self) -> dict[str, Any]:
@@ -126,12 +202,35 @@ class DevicePlugin(ABC):
         """
 
     @abstractmethod
-    def apply_profile(self, profile: "ProfileData") -> None:
+    def _get_capture(self):
+        """Return the running capture thread, or None if not active."""
+
+    def apply_profile(self, profile: "ProfileData",
+                      library: "MacroLibrary | None" = None) -> None:
         """
         Apply the given profile to the physical device.
-        profile.plugin_data[self.name] contains device-specific state.
-        Raises DeviceError on failure.
+
+        Resolves each button's MacroRef (macro name) to a NamedMacro from
+        the library, skips locked buttons, and calls capture.update_routing_map().
+        Plugins do not need to override this.
         """
+        capture = self._get_capture()
+        if capture is None:
+            return
+        specs = {s.id: s for s in self.get_button_specs()}
+        routing: dict[str, "NamedMacro"] = {}
+        plugin_bindings = profile.bindings.get(self.name, {})
+        for btn_id, macro_ref in plugin_bindings.items():
+            spec = specs.get(btn_id)
+            if spec is None or spec.locked:
+                continue
+            if not macro_ref.macro_name:
+                continue
+            macro = library.get(macro_ref.macro_name) if library else None
+            if macro is None:
+                continue
+            routing[btn_id] = macro
+        capture.update_routing_map(routing)
 
     # ── Optional hardware slot support ────────────────────────────────────────
 

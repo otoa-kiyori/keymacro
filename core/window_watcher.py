@@ -29,20 +29,12 @@ from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
 
 _KWIN_SCRIPT = """\
 (function() {
-    var _lastClass = "";
-    function _kmPoll() {
-        var w = workspace.activeWindow;
+    function _kmNotify(w) {
         var cls = (w && w.resourceClass) ? w.resourceClass : "";
-        if (cls !== _lastClass) {
-            _lastClass = cls;
-            callDBus("org.keymacro.watcher", "/", "", "onWindowActivated", cls);
-        }
+        callDBus("org.keymacro.watcher", "/", "", "onWindowActivated", cls);
     }
-    var _timer = new QTimer();
-    _timer.interval = 250;
-    _timer.timeout.connect(_kmPoll);
-    _timer.start();
-    _kmPoll();
+    workspace.windowActivated.connect(_kmNotify);
+    _kmNotify(workspace.activeWindow);
 })();
 """
 

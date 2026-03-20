@@ -1,0 +1,192 @@
+# keymacro key reference — all tokens that can be sent to the OS
+#
+# Columns
+# -------
+# macro_name   unique key used in macro sequences and as binding reference
+# evdev_name   underlying Linux kernel evdev name (documentation only)
+# category     visual grouping label in the macro list UI
+# display_name human label shown in the list (defaults to macro_name if blank)
+# press        space-separated token sequence (defaults to "+macro_name" if blank)
+#              single keys: leave blank → generates "+macro_name"
+#              combo keys:  e.g. "+LeftShift +Equal"   (release auto-derived)
+# description  tooltip / search text
+#
+# Token prefix rules
+#   +Key   hold key down        -Key   release key        Key   tap (press + release)
+#
+# release_auto=True on all built-ins: release is auto-derived from press
+# (reverses the press sequence and flips every + to -)
+
+macro_name,evdev_name,category,display_name,press,description
+
+# ── Modifiers ─────────────────────────────────────────────────────────────────
+LeftCtrl,KEY_LEFTCTRL,Modifiers,,,Left Control key
+RightCtrl,KEY_RIGHTCTRL,Modifiers,,,Right Control key
+LeftShift,KEY_LEFTSHIFT,Modifiers,,,Left Shift key
+RightShift,KEY_RIGHTSHIFT,Modifiers,,,Right Shift key
+LeftAlt,KEY_LEFTALT,Modifiers,,,Left Alt key
+RightAlt,KEY_RIGHTALT,Modifiers,,,Right Alt / AltGr key
+LeftMeta,KEY_LEFTMETA,Modifiers,,,Left Super / Win / ⌘ key
+RightMeta,KEY_RIGHTMETA,Modifiers,,,Right Super / Win / ⌘ key
+
+# ── Navigation ────────────────────────────────────────────────────────────────
+Up,KEY_UP,Navigation,,,Arrow key ↑
+Down,KEY_DOWN,Navigation,,,Arrow key ↓
+Left,KEY_LEFT,Navigation,,,Arrow key ←
+Right,KEY_RIGHT,Navigation,,,Arrow key →
+Home,KEY_HOME,Navigation,,,Home — move to beginning of line
+End,KEY_END,Navigation,,,End — move to end of line
+PageUp,KEY_PAGEUP,Navigation,,,Page Up — scroll up one page
+PageDown,KEY_PAGEDOWN,Navigation,,,Page Down — scroll down one page
+Insert,KEY_INSERT,Navigation,,,Insert key — toggle insert/overwrite mode
+Delete,KEY_DELETE,Navigation,,,Delete — delete character to the right
+
+# ── Common keys ───────────────────────────────────────────────────────────────
+Escape,KEY_ESC,Common,,,Escape — cancel / close dialog
+Enter,KEY_ENTER,Common,,,Enter / Return — confirm / newline
+Space,KEY_SPACE,Common,,,Space bar
+Tab,KEY_TAB,Common,,,Tab — indent / next field
+Backspace,KEY_BACKSPACE,Common,,,Backspace — delete character to the left
+CapsLock,KEY_CAPSLOCK,Common,,,Caps Lock — toggle uppercase
+NumLock,KEY_NUMLOCK,Common,,,Num Lock — toggle numpad numbers vs arrows
+ScrollLock,KEY_SCROLLLOCK,Common,,,Scroll Lock
+PrintScreen,KEY_SYSRQ,Common,,,Print Screen / SysRq
+Pause,KEY_PAUSE,Common,,,Pause / Break
+
+# ── Function keys ─────────────────────────────────────────────────────────────
+F1,KEY_F1,Function Keys,,,Function key F1
+F2,KEY_F2,Function Keys,,,Function key F2
+F3,KEY_F3,Function Keys,,,Function key F3
+F4,KEY_F4,Function Keys,,,Function key F4
+F5,KEY_F5,Function Keys,,,Function key F5
+F6,KEY_F6,Function Keys,,,Function key F6
+F7,KEY_F7,Function Keys,,,Function key F7
+F8,KEY_F8,Function Keys,,,Function key F8
+F9,KEY_F9,Function Keys,,,Function key F9
+F10,KEY_F10,Function Keys,,,Function key F10
+F11,KEY_F11,Function Keys,,,Function key F11
+F12,KEY_F12,Function Keys,,,Function key F12
+F13,KEY_F13,Function Keys,,,Function key F13
+F14,KEY_F14,Function Keys,,,Function key F14
+F15,KEY_F15,Function Keys,,,Function key F15
+F16,KEY_F16,Function Keys,,,Function key F16
+F17,KEY_F17,Function Keys,,,Function key F17
+F18,KEY_F18,Function Keys,,,Function key F18
+F19,KEY_F19,Function Keys,,,Function key F19
+F20,KEY_F20,Function Keys,,,Function key F20
+F21,KEY_F21,Function Keys,,,Function key F21
+F22,KEY_F22,Function Keys,,,Function key F22
+F23,KEY_F23,Function Keys,,,Function key F23
+F24,KEY_F24,Function Keys,,,Function key F24
+
+# ── Letters ───────────────────────────────────────────────────────────────────
+A,KEY_A,Letters,,,Letter A
+B,KEY_B,Letters,,,Letter B
+C,KEY_C,Letters,,,Letter C
+D,KEY_D,Letters,,,Letter D
+E,KEY_E,Letters,,,Letter E
+F,KEY_F,Letters,,,Letter F
+G,KEY_G,Letters,,,Letter G
+H,KEY_H,Letters,,,Letter H
+I,KEY_I,Letters,,,Letter I
+J,KEY_J,Letters,,,Letter J
+K,KEY_K,Letters,,,Letter K
+L,KEY_L,Letters,,,Letter L
+M,KEY_M,Letters,,,Letter M
+N,KEY_N,Letters,,,Letter N
+O,KEY_O,Letters,,,Letter O
+P,KEY_P,Letters,,,Letter P
+Q,KEY_Q,Letters,,,Letter Q
+R,KEY_R,Letters,,,Letter R
+S,KEY_S,Letters,,,Letter S
+T,KEY_T,Letters,,,Letter T
+U,KEY_U,Letters,,,Letter U
+V,KEY_V,Letters,,,Letter V
+W,KEY_W,Letters,,,Letter W
+X,KEY_X,Letters,,,Letter X
+Y,KEY_Y,Letters,,,Letter Y
+Z,KEY_Z,Letters,,,Letter Z
+
+# ── Digits ────────────────────────────────────────────────────────────────────
+0,KEY_0,Digits,,,Digit 0 (main row)
+1,KEY_1,Digits,,,Digit 1 (main row)
+2,KEY_2,Digits,,,Digit 2 (main row)
+3,KEY_3,Digits,,,Digit 3 (main row)
+4,KEY_4,Digits,,,Digit 4 (main row)
+5,KEY_5,Digits,,,Digit 5 (main row)
+6,KEY_6,Digits,,,Digit 6 (main row)
+7,KEY_7,Digits,,,Digit 7 (main row)
+8,KEY_8,Digits,,,Digit 8 (main row)
+9,KEY_9,Digits,,,Digit 9 (main row)
+
+# ── Shifted digits (Shift + digit row) ────────────────────────────────────────
+Exclaim,,Shifted Digits,!,+LeftShift +1,Exclamation mark  (Shift+1)
+At,,Shifted Digits,@,+LeftShift +2,At sign  (Shift+2)
+Hash,,Shifted Digits,#,+LeftShift +3,Hash / number sign  (Shift+3)
+Dollar,,Shifted Digits,$,+LeftShift +4,Dollar sign  (Shift+4)
+Percent,,Shifted Digits,%,+LeftShift +5,Percent  (Shift+5)
+Caret,,Shifted Digits,^,+LeftShift +6,Caret  (Shift+6)
+Ampersand,,Shifted Digits,&,+LeftShift +7,Ampersand  (Shift+7)
+Asterisk,,Shifted Digits,*,+LeftShift +8,Asterisk  (Shift+8)
+LeftParen,,Shifted Digits,(,+LeftShift +9,Left parenthesis  (Shift+9)
+RightParen,,Shifted Digits,),+LeftShift +0,Right parenthesis  (Shift+0)
+
+# ── Symbols (US layout) ───────────────────────────────────────────────────────
+Minus,KEY_MINUS,Symbols,-,,Minus / Underscore  (- _)
+Equal,KEY_EQUAL,Symbols,=,,Equal / Plus  (= +)
+LeftBrace,KEY_LEFTBRACE,Symbols,[,,Left bracket  ([ {)
+RightBrace,KEY_RIGHTBRACE,Symbols,],,Right bracket  (] })
+Semicolon,KEY_SEMICOLON,Symbols,;,,Semicolon / Colon  (; :)
+Apostrophe,KEY_APOSTROPHE,Symbols,',,Apostrophe / Quote  (' ")
+Grave,KEY_GRAVE,Symbols,`,,Grave / Tilde  (` ~)
+Backslash,KEY_BACKSLASH,Symbols,\,,Backslash / Pipe  (\ |)
+Comma,KEY_COMMA,Symbols,",",,Comma / Less-than  (, <)
+Dot,KEY_DOT,Symbols,.,,Period / Greater-than  (. >)
+Slash,KEY_SLASH,Symbols,/,,Slash / Question mark  (/ ?)
+
+# ── Shifted symbols (Shift + symbol key) ──────────────────────────────────────
+Underscore,,Shifted Symbols,_,+LeftShift +Minus,Underscore  (Shift+-)
+Plus,,Shifted Symbols,+,+LeftShift +Equal,Plus sign  (Shift+=)
+LeftCurly,,Shifted Symbols,{ ,+LeftShift +LeftBrace,Left curly brace  (Shift+[)
+RightCurly,,Shifted Symbols,},+LeftShift +RightBrace,Right curly brace  (Shift+])
+Colon,,Shifted Symbols,:,+LeftShift +Semicolon,Colon  (Shift+;)
+DoubleQuote,,Shifted Symbols,"""",+LeftShift +Apostrophe,Double quote  (Shift+')
+Tilde,,Shifted Symbols,~,+LeftShift +Grave,Tilde  (Shift+`)
+Pipe,,Shifted Symbols,|,+LeftShift +Backslash,Pipe / vertical bar  (Shift+\)
+LessThan,,Shifted Symbols,<,+LeftShift +Comma,Less-than  (Shift+,)
+GreaterThan,,Shifted Symbols,>,+LeftShift +Dot,Greater-than  (Shift+.)
+Question,,Shifted Symbols,?,+LeftShift +Slash,Question mark  (Shift+/)
+
+# ── Numpad ────────────────────────────────────────────────────────────────────
+Num0,KEY_KP0,Numpad,Num 0,,Numpad 0 / Insert
+Num1,KEY_KP1,Numpad,Num 1,,Numpad 1 / End
+Num2,KEY_KP2,Numpad,Num 2,,Numpad 2 / Arrow Down
+Num3,KEY_KP3,Numpad,Num 3,,Numpad 3 / Page Down
+Num4,KEY_KP4,Numpad,Num 4,,Numpad 4 / Arrow Left
+Num5,KEY_KP5,Numpad,Num 5,,Numpad 5
+Num6,KEY_KP6,Numpad,Num 6,,Numpad 6 / Arrow Right
+Num7,KEY_KP7,Numpad,Num 7,,Numpad 7 / Home
+Num8,KEY_KP8,Numpad,Num 8,,Numpad 8 / Arrow Up
+Num9,KEY_KP9,Numpad,Num 9,,Numpad 9 / Page Up
+Num+,KEY_KPPLUS,Numpad,Num +,,Numpad + (addition)
+Num-,KEY_KPMINUS,Numpad,Num -,,Numpad − (subtraction)
+Num*,KEY_KPASTERISK,Numpad,Num ×,,Numpad × (multiplication)
+Num/,KEY_KPSLASH,Numpad,Num ÷,,Numpad ÷ (division)
+Num.,KEY_KPDOT,Numpad,Num .,,Numpad . / Delete
+NumEnter,KEY_KPENTER,Numpad,Num ↵,,Numpad Enter
+
+# ── Media ─────────────────────────────────────────────────────────────────────
+Mute,KEY_MUTE,Media,,,Mute / unmute audio output
+VolumeUp,KEY_VOLUMEUP,Media,,,Increase system volume
+VolumeDown,KEY_VOLUMEDOWN,Media,,,Decrease system volume
+NextSong,KEY_NEXTSONG,Media,,,Skip to next media track
+PrevSong,KEY_PREVIOUSSONG,Media,,,Go back to previous media track
+PlayPause,KEY_PLAYPAUSE,Media,,,Play or pause media playback
+StopCd,KEY_STOPCD,Media,,,Stop media playback
+
+# ── Mouse buttons ─────────────────────────────────────────────────────────────
+LeftButton,BTN_LEFT,Mouse,,,Left mouse button click
+RightButton,BTN_RIGHT,Mouse,,,Right mouse button click
+MiddleButton,BTN_MIDDLE,Mouse,,,Middle mouse button / scroll-wheel click
+BackButton,BTN_SIDE,Mouse,,,Mouse back button (browser back)
+ForwardButton,BTN_EXTRA,Mouse,,,Mouse forward button (browser forward)

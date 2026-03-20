@@ -35,29 +35,31 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.config import PROFILES_FILE, ensure_dirs
+import yaml
+
+from core.config import PROFILES_FILE, _PROFILES_JSON, ensure_dirs
 
 
 @dataclass
 class MacroRef:
-    """Binding for one button: inline token list OR named library macro."""
-    inline_tokens: list[str] | None = None
-    library_name:  str | None       = None
+    """
+    A button binding — references a named macro in the global MacroLibrary.
+
+    Profiles never store sequences directly; they store the macro name.
+    The actual mode/press/release data lives in NamedMacro.
+    """
+    macro_name: str = ""    # references NamedMacro.name in MacroLibrary
 
     def to_dict(self) -> dict:
-        d: dict = {}
-        if self.inline_tokens is not None:
-            d["inline_tokens"] = self.inline_tokens
-        if self.library_name is not None:
-            d["library_name"] = self.library_name
-        return d
+        return {"macro_name": self.macro_name}
 
     @classmethod
     def from_dict(cls, d: dict) -> "MacroRef":
-        return cls(
-            inline_tokens=d.get("inline_tokens"),
-            library_name=d.get("library_name"),
-        )
+        # Backward compat: old format used inline_tokens or library_name
+        if "macro_name" not in d:
+            name = d.get("library_name") or ""
+            return cls(macro_name=name)
+        return cls(macro_name=d["macro_name"])
 
 
 @dataclass
@@ -65,24 +67,28 @@ class ProfileData:
     """
     A single unified keymacro profile covering ALL devices.
 
-    bindings:    {plugin_name: {button_id: MacroRef}}
-    plugin_data: {plugin_name: opaque device-specific dict}
-                  e.g. {"g600": {"hw_slot": 0, "dpi": 1200, ...}}
+    bindings:       {plugin_name: {button_id: MacroRef}}
+    plugin_data:    {plugin_name: opaque device-specific dict}
+    associated_apps: list of window resource classes that auto-switch to this
+                    profile when the app becomes focused  (1-to-many)
+                    e.g. ["steam", "firefox", "code"]
     """
-    name: str
-    bindings:    dict[str, dict[str, MacroRef]] = field(default_factory=dict)
-    plugin_data: dict[str, Any]                 = field(default_factory=dict)
+    name:            str
+    bindings:        dict[str, dict[str, MacroRef]] = field(default_factory=dict)
+    plugin_data:     dict[str, Any]                 = field(default_factory=dict)
+    associated_apps: list[str]                      = field(default_factory=list)
 
     # ── Serialization ─────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
         return {
-            "name": self.name,
+            "name":            self.name,
             "bindings": {
                 plugin: {btn: ref.to_dict() for btn, ref in btns.items()}
                 for plugin, btns in self.bindings.items()
             },
-            "plugin_data": self.plugin_data,
+            "plugin_data":     self.plugin_data,
+            "associated_apps": self.associated_apps,
         }
 
     @classmethod
@@ -91,9 +97,10 @@ class ProfileData:
         for plugin, btns in d.get("bindings", {}).items():
             bindings[plugin] = {btn: MacroRef.from_dict(ref) for btn, ref in btns.items()}
         return cls(
-            name=d["name"],
-            bindings=bindings,
-            plugin_data=d.get("plugin_data", {}),
+            name            = d["name"],
+            bindings        = bindings,
+            plugin_data     = d.get("plugin_data", {}),
+            associated_apps = d.get("associated_apps", []),
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -129,15 +136,32 @@ class ProfileStore:
 
     def load_from_disk(self) -> None:
         ensure_dirs()
+        # One-time migration: JSON → YAML
+        if not PROFILES_FILE.exists() and _PROFILES_JSON.exists():
+            self._migrate_json(_PROFILES_JSON)
+            return
         if not PROFILES_FILE.exists():
             return
         try:
             with open(PROFILES_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                data = yaml.safe_load(f) or {}
             self._profiles = [ProfileData.from_dict(p) for p in data.get("profiles", [])]
             self._active   = data.get("active")
         except Exception as e:
             print(f"[ProfileStore] load error: {e}")
+
+    def _migrate_json(self, json_path) -> None:
+        """Load the legacy JSON file, re-save as YAML, and delete the JSON."""
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._profiles = [ProfileData.from_dict(p) for p in data.get("profiles", [])]
+            self._active   = data.get("active")
+            self.flush_to_disk()
+            json_path.unlink(missing_ok=True)
+            print(f"[ProfileStore] migrated {json_path.name} → profiles.yaml")
+        except Exception as e:
+            print(f"[ProfileStore] migration error: {e}")
 
     def flush_to_disk(self) -> None:
         ensure_dirs()
@@ -147,7 +171,8 @@ class ProfileStore:
         }
         try:
             with open(PROFILES_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                yaml.dump(data, f, allow_unicode=True, sort_keys=False,
+                          default_flow_style=False)
         except Exception as e:
             print(f"[ProfileStore] save error: {e}")
 
@@ -203,6 +228,14 @@ class ProfileStore:
         self.flush_to_disk()
 
     # ── Active profile ────────────────────────────────────────────────────────
+
+    def find_by_app(self, resource_class: str) -> ProfileData | None:
+        """Return the first profile whose associated_apps contains resource_class."""
+        rc = resource_class.lower()
+        for p in self._profiles:
+            if rc in [a.lower() for a in p.associated_apps]:
+                return p
+        return None
 
     def get_active_name(self) -> str | None:
         return self._active

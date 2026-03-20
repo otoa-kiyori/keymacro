@@ -47,6 +47,7 @@ class AppSignals(QObject):
     device_connected      = pyqtSignal(str)        # plugin_name
     device_disconnected   = pyqtSignal(str)        # plugin_name
     plugin_error          = pyqtSignal(str, str)   # plugin_name, message
+    device_reset          = pyqtSignal(str)        # plugin_name
 
     # ── Profile (global — no plugin_name) ─────────────────────────────────────
     profile_changed           = pyqtSignal(str)    # profile_name

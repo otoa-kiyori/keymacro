@@ -1,0 +1,67 @@
+# G13 button definitions — single source of truth for signal detection and UI.
+#
+# Columns:
+#   button_id    unique key used in profiles and routing maps
+#   bit_index    position in the 40-bit USB HID bitmask (bytes 3–7 of the 8-byte report)
+#                -1 = virtual button derived from joystick X/Y axis values
+#   stick_axis   for virtual stick buttons: x or y axis  (empty for bitmask buttons)
+#   stick_dir    for virtual stick buttons: low or high   (empty for bitmask buttons)
+#                  low  = axis value < STICK_LOW  (50)
+#                  high = axis value > STICK_HIGH (205)
+#   locked       true = never reassignable
+#   zone         UI grouping hint: key / lcd / mode / dpad / stick
+#
+# Bitmask layout confirmed by hardware test (debug_g13.py, 2026-03-19):
+#   byte 3 bits 0–6  : G1–G7
+#   byte 3 bit  7    : G8
+#   byte 4 bits 0–7  : G9–G16
+#   byte 5 bits 0–3  : G17–G20
+#   byte 5 bit  4    : G21
+#   byte 5 bit  5    : G22
+#   byte 5 bits 6–7  : always-on — omitted
+#   byte 6 bit  0    : CIRCLE (small round button left of L/M row)
+#   byte 6 bits 1–4  : L1–L4
+#   byte 6 bits 5–7  : M1–M3
+#   byte 7 bit  0    : MR
+#   byte 7 bit  1    : LEFT (joystick rim click — arrives batched with stick reports)
+#   byte 7 bit  2    : BD
+#   byte 7 bit  7    : always-on hardware bit — omitted
+#
+button_id,bit_index,stick_axis,stick_dir,locked,zone
+G1,0,,,false,key
+G2,1,,,false,key
+G3,2,,,false,key
+G4,3,,,false,key
+G5,4,,,false,key
+G6,5,,,false,key
+G7,6,,,false,key
+G8,7,,,false,key
+G9,8,,,false,key
+G10,9,,,false,key
+G11,10,,,false,key
+G12,11,,,false,key
+G13,12,,,false,key
+G14,13,,,false,key
+G15,14,,,false,key
+G16,15,,,false,key
+G17,16,,,false,key
+G18,17,,,false,key
+G19,18,,,false,key
+G20,19,,,false,key
+G21,20,,,false,key
+G22,21,,,false,key
+CIRCLE,24,,,false,lcd
+LEFT,33,,,false,dpad
+BD,34,,,false,dpad
+L1,25,,,false,lcd
+L2,26,,,false,lcd
+L3,27,,,false,lcd
+L4,28,,,false,lcd
+M1,29,,,false,mode
+M2,30,,,false,mode
+M3,31,,,false,mode
+MR,32,,,false,mode
+STICK_UP,-1,y,low,false,stick
+STICK_DOWN,-1,y,high,false,stick
+STICK_LEFT,-1,x,low,false,stick
+STICK_RIGHT,-1,x,high,false,stick

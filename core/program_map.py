@@ -10,7 +10,10 @@ Resource class is the lowercase class reported by KWin (window.resourceClass).
 from __future__ import annotations
 
 import json
-from core.config import PROGRAMS_FILE, ensure_dirs
+
+import yaml
+
+from core.config import PROGRAMS_FILE, _PROGRAMS_JSON, ensure_dirs
 
 
 class ProgramProfileMap:
@@ -20,18 +23,28 @@ class ProgramProfileMap:
         self._map: dict[str, str] = {}   # resource_class (lower) → profile_name
 
     def load_from_disk(self) -> None:
+        # One-time migration: JSON → YAML
+        if not PROGRAMS_FILE.exists() and _PROGRAMS_JSON.exists():
+            try:
+                self._map = json.loads(_PROGRAMS_JSON.read_text(encoding="utf-8"))
+                self.save_to_disk()
+                _PROGRAMS_JSON.unlink(missing_ok=True)
+                print("[ProgramProfileMap] migrated programs.json → programs.yaml")
+            except Exception:
+                self._map = {}
+            return
         if PROGRAMS_FILE.exists():
             try:
-                self._map = json.loads(PROGRAMS_FILE.read_text(encoding="utf-8"))
+                with open(PROGRAMS_FILE, "r", encoding="utf-8") as f:
+                    self._map = yaml.safe_load(f) or {}
             except Exception:
                 self._map = {}
 
     def save_to_disk(self) -> None:
         ensure_dirs()
-        PROGRAMS_FILE.write_text(
-            json.dumps(self._map, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        with open(PROGRAMS_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(self._map, f, allow_unicode=True, sort_keys=True,
+                      default_flow_style=False)
 
     def get_all(self) -> dict[str, str]:
         """Return a copy of the full mapping."""

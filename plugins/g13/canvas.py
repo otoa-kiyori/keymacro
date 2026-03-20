@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import QWidget, QPushButton
 
+
 if TYPE_CHECKING:
     from core.signals import AppSignals
 
@@ -70,6 +71,27 @@ _KEY_DISPLAY = {
     "STICK_LEFT":  "←",
     "STICK_RIGHT": "→",
 }
+
+
+_STYLE_RESET = """
+    QPushButton {
+        background-color: #f5d0c8;
+        border: 1px solid #c84020;
+        border-radius: 4px;
+        color: #601000;
+        font-family: 'Courier New', monospace;
+        font-size: 10px;
+        font-weight: 600;
+        padding: 2px;
+    }
+    QPushButton:hover {
+        background-color: #e89080;
+        border-color: #a02000;
+    }
+    QPushButton:pressed {
+        border: 2px solid #c84020;
+    }
+"""
 
 
 def _zone_for(key: str) -> str:
@@ -150,6 +172,16 @@ class G13Canvas(QWidget):
             btn.clicked.connect(lambda checked, k=key: self._on_click(k))
             self.buttons[key] = btn
 
+        # Reset button — bottom-left, below the G-key block
+        reset_btn = QPushButton("↺ Reset", self)
+        reset_btn.setGeometry(8, 418, 100, 26)
+        reset_btn.setStyleSheet(_STYLE_RESET)
+        reset_btn.setToolTip("Hard-reset the G13 (USB cycle + restart capture)")
+        reset_btn.clicked.connect(self._on_reset)
+
+    def _on_reset(self) -> None:
+        self._signals.device_reset.emit(self._plugin_name)
+
     def _on_click(self, key: str) -> None:
         self._signals.button_clicked.emit(self._plugin_name, key)
 
@@ -167,15 +199,8 @@ class G13Canvas(QWidget):
 
     @staticmethod
     def _short_label(key: str, val: str) -> str:
+        """val is already a human-readable display name — use it directly."""
         display = _KEY_DISPLAY.get(key, key)
         if not val:
             return f"{display}\n—"
-        v = (val.replace("KEY_LEFTCTRL+", "^")
-                .replace("KEY_LEFTSHIFT+", "⇧")
-                .replace("KEY_LEFTALT+", "⌥")
-                .replace("KEY_", ""))
-        if v.startswith("!profile "):
-            v = "»" + v[9:]
-        if len(v) > 9:
-            v = v[:8] + "…"
-        return f"{display}\n{v}"
+        return f"{display}\n{val}"

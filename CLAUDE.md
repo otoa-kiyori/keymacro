@@ -29,7 +29,7 @@ keymacro/
 ```
 
 ## Key rules
-- `core/` and `ui/` MUST NOT import any device-specific packages (evdev, ratbagctl etc.)
+- `core/` and `ui/` MUST NOT import any device-specific packages (evdev, pyusb, etc.)
 - Plugin deps isolated to `plugins/<name>/requirements.txt` only
 - Missing plugin deps → plugin reports `is_available()=False` with install hint; never crashes core
 - Config stored under `~/.config/keymacro/` (XDG via QStandardPaths)

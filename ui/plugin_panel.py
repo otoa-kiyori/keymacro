@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt
 if TYPE_CHECKING:
     from core.signals        import AppSignals
     from core.plugin_manager import PluginManager
+    from core.profile_store  import ProfileStore
 
 
 class PluginPanel(QWidget):
@@ -35,11 +36,14 @@ class PluginPanel(QWidget):
         signals:        "AppSignals",
         plugin_manager: "PluginManager",
         active_plugins: dict,          # shared reference to KMApp._active_plugins
+        store:          "ProfileStore | None" = None,
         parent=None,
     ):
         super().__init__(parent)
         self._signals        = signals
         self._pm             = plugin_manager
+        self._store          = store
+        self._debug_windows: dict[str, object] = {}   # plugin_name → InputDebugWindow
         # Track active set locally — kept in sync via signals
         self._active_names: set[str] = set(active_plugins.keys())
         self._build_ui()
@@ -79,10 +83,18 @@ class PluginPanel(QWidget):
         btn_row = QHBoxLayout()
         self._btn_activate   = QPushButton("Activate")
         self._btn_deactivate = QPushButton("Deactivate")
+        self._btn_reset      = QPushButton("↺ Reset")
+        self._btn_debug      = QPushButton("🔍 Debug")
+        self._btn_reset.setToolTip("Hard-reset device (USB cycle + restart capture)")
+        self._btn_debug.setToolTip("Open live input log — macro engine paused while open")
         self._btn_activate.clicked.connect(self._on_activate)
         self._btn_deactivate.clicked.connect(self._on_deactivate)
+        self._btn_reset.clicked.connect(self._on_reset)
+        self._btn_debug.clicked.connect(self._on_debug)
         btn_row.addWidget(self._btn_activate)
         btn_row.addWidget(self._btn_deactivate)
+        btn_row.addWidget(self._btn_reset)
+        btn_row.addWidget(self._btn_debug)
         btn_row.addStretch()
 
         rl.addWidget(self._lbl_name)
@@ -172,6 +184,8 @@ class PluginPanel(QWidget):
 
         self._btn_activate.setEnabled(available and not is_active)
         self._btn_deactivate.setEnabled(is_active)
+        self._btn_reset.setEnabled(is_active)
+        self._btn_debug.setEnabled(is_active and self._store is not None)
 
     def _clear_info(self) -> None:
         self._lbl_name.clear()
@@ -180,6 +194,8 @@ class PluginPanel(QWidget):
         self._hint_box.setVisible(False)
         self._btn_activate.setEnabled(False)
         self._btn_deactivate.setEnabled(False)
+        self._btn_reset.setEnabled(False)
+        self._btn_debug.setEnabled(False)
 
     def _current_plugin_name(self) -> str | None:
         item = self._list.currentItem()
@@ -194,6 +210,43 @@ class PluginPanel(QWidget):
         name = self._current_plugin_name()
         if name:
             self._signals.plugin_deactivated.emit(name)
+
+    def _on_reset(self) -> None:
+        name = self._current_plugin_name()
+        if name:
+            self._signals.device_reset.emit(name)
+
+    def _on_debug(self) -> None:
+        from ui.input_debug_window import InputDebugWindow
+
+        name = self._current_plugin_name()
+        if not name or not self._store:
+            return
+
+        # Bring existing window to front rather than opening a second one
+        existing = self._debug_windows.get(name)
+        if existing and not existing.isHidden():
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        plugin = self._pm.get_plugin(name)
+        if plugin is None:
+            return
+        capture = plugin._get_capture()
+        if capture is None:
+            return
+
+        win = InputDebugWindow(
+            capture      = capture,
+            plugin_id    = name,
+            display_name = plugin.display_name,
+            signals      = self._signals,
+            store        = self._store,
+            parent       = self,
+        )
+        self._debug_windows[name] = win
+        win.show()
 
     def _connect_signals(self) -> None:
         self._signals.plugin_activated.connect(self._on_plugin_activated)
