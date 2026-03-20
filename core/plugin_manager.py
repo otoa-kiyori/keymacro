@@ -194,6 +194,28 @@ class DevicePlugin(ABC):
             routing[btn_id] = macro
         capture.update_routing_map(routing)
 
+    # ── Feedback (core → device) ──────────────────────────────────────────────
+
+    def supports_feedback(self) -> bool:
+        """
+        Return True if this plugin supports core→device feedback
+        (LCD text, LED colour, rumble, etc.).
+
+        When True, core will call on_profile_changed() after every profile
+        switch and immediately after the plugin is activated.
+        Default: False.
+        """
+        return False
+
+    def on_profile_changed(self, profile_name: str) -> None:
+        """
+        Called by core when the active profile changes.
+
+        Must be non-blocking — put work on a queue or thread.
+        Only called when supports_feedback() returns True.
+        Default: no-op.
+        """
+
     # ── Optional hardware slot support ────────────────────────────────────────
 
     def get_hw_slot_count(self) -> int:

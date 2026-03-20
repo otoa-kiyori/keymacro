@@ -42,6 +42,16 @@ except ImportError:
     _USB_OK = False
 
 try:
+    from plugins.g13.lcd import render_text as _render_text, \
+                                 clear_buffer as _clear_buffer, \
+                                 is_available as _lcd_available
+    _LCD_OK = _lcd_available()
+except ImportError:
+    _LCD_OK = False
+    _render_text  = None   # type: ignore
+    _clear_buffer = None   # type: ignore
+
+try:
     import evdev as _evdev
     _EVDEV_OK = True
 except ImportError:
@@ -166,6 +176,9 @@ class G13Plugin(DevicePlugin):
 
     def deactivate(self) -> None:
         if self._capture is not None:
+            # Blank the LCD before closing the USB handle.
+            if _LCD_OK and _clear_buffer is not None:
+                self._capture.request_lcd_update(_clear_buffer())
             self._capture.stop()
             self._capture.join(timeout=2.0)   # wait for _teardown() to release USB
             self._capture = None
@@ -178,6 +191,18 @@ class G13Plugin(DevicePlugin):
                 dev.reset()
         except Exception:
             pass
+
+    # ── Feedback (core → device) ──────────────────────────────────────────────
+
+    def supports_feedback(self) -> bool:
+        return _LCD_OK
+
+    def on_profile_changed(self, profile_name: str) -> None:
+        if self._capture is None or not self._capture.is_alive():
+            return
+        buf = _render_text(profile_name)
+        if buf is not None:
+            self._capture.request_lcd_update(buf)
 
     # ── Device semantics ──────────────────────────────────────────────────────
 

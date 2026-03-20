@@ -37,6 +37,7 @@ PYTHON_DEPS=(
     "PyYAML:python3-yaml:yaml"
     "pyusb:python3-usb:usb"
     "evdev:python3-evdev:evdev"
+    "Pillow:python3-pil:PIL"
 )
 
 # Returns 0 (true) if another installed package depends on $apt_name

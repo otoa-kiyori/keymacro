@@ -212,6 +212,15 @@ class KMApp:
         self.signals.plugin_activated.emit(plugin_name)
         self.signals.status_message.emit(f"Plugin activated: {plugin.display_name}")
 
+        # Push current profile to device feedback (e.g. LCD) immediately.
+        if plugin.supports_feedback():
+            active_name = self.store.get_active_name()
+            if active_name:
+                try:
+                    plugin.on_profile_changed(active_name)
+                except Exception:
+                    pass
+
     def _deactivate_plugin(self, plugin_name: str) -> None:
         """Remove a plugin from the active set."""
         plugin = self._active_plugins.pop(plugin_name, None)
@@ -258,6 +267,16 @@ class KMApp:
         # One status message from core — not one per plugin.
         if is_new:
             self.signals.status_message.emit(f"Profile: {profile_name}")
+            self._notify_feedback(profile_name)
+
+    def _notify_feedback(self, profile_name: str) -> None:
+        """Call on_profile_changed() on every active plugin that supports feedback."""
+        for plugin in list(self._active_plugins.values()):
+            if plugin.supports_feedback():
+                try:
+                    plugin.on_profile_changed(profile_name)
+                except Exception:
+                    pass
 
     def _apply_to_plugin(self, plugin, profile) -> None:
         runnable = _ApplyProfileRunnable(plugin, profile, self.signals, self.macro_library)

@@ -106,6 +106,10 @@ class G13RawCapture(threading.Thread):
         self._dev    = None   # usb.core.Device
         self._uinput = None   # evdev.UInput  (None until /dev/uinput is ready)
 
+        # LCD feedback: latest pending buffer to write (None = nothing pending)
+        self._lcd_lock    = threading.Lock()
+        self._lcd_pending: bytes | None = None
+
         # Previous state
         self._prev_bits  = 0
         self._prev_stick = {("y", "low"): False, ("y", "high"): False,
@@ -135,6 +139,14 @@ class G13RawCapture(threading.Thread):
     def set_debug_mode(self, enabled: bool) -> None:
         """No-op on G13 — unrouted buttons are already swallowed, nothing to suppress."""
         pass
+
+    def request_lcd_update(self, buffer: bytes) -> None:
+        """
+        Thread-safe: queue a pre-rendered LCD buffer for the capture thread to write.
+        Only the latest buffer is kept — stale updates are discarded.
+        """
+        with self._lcd_lock:
+            self._lcd_pending = buffer
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -221,10 +233,22 @@ class G13RawCapture(threading.Thread):
 
     # ── Event loop ────────────────────────────────────────────────────────────
 
+    def _flush_lcd(self) -> None:
+        """Write any pending LCD buffer to the device (capture-thread only)."""
+        with self._lcd_lock:
+            buf = self._lcd_pending
+            self._lcd_pending = None
+        if buf is not None:
+            from plugins.g13.lcd import write_lcd
+            write_lcd(self._dev, buf)
+
     def _event_loop(self) -> None:
         _last_uinput_try = 0.0
 
         while not self._stop_event.is_set():
+            # Drain any pending LCD update (core→device feedback)
+            self._flush_lcd()
+
             # Retry uinput if it wasn't available at startup
             if self._uinput is None:
                 now = time.monotonic()

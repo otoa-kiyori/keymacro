@@ -1,5 +1,6 @@
 # G13 plugin dependencies
-# Install via: pip install pyusb evdev
-# or:          sudo apt install python3-usb python3-evdev
+# Install via: pip install pyusb evdev Pillow
+# or:          sudo apt install python3-usb python3-evdev python3-pil
 pyusb
 evdev
+Pillow   # optional: LCD profile name display (gracefully skipped if absent)
