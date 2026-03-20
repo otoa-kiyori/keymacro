@@ -12,6 +12,7 @@
 #   5. Adds the current user to the input and plugdev groups
 #   6. Creates a launcher script at ~/bin/keymacro
 #   7. Installs the autostart entry so keymacro starts with KDE
+#   8. Installs the application menu entry so keymacro appears in KDE start menu
 
 set -euo pipefail
 
@@ -21,8 +22,10 @@ MODULES_FILE="/etc/modules-load.d/keymacro.conf"
 LAUNCHER="$HOME/bin/keymacro"
 AUTOSTART_DIR="$HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/keymacro.desktop"
+APPS_DIR="$HOME/.local/share/applications"
+APPS_FILE="$APPS_DIR/keymacro.desktop"
 
-TOTAL_STEPS=7
+TOTAL_STEPS=8
 STEP=0
 
 step() {
@@ -139,6 +142,25 @@ X-KDE-AutostartEnabled=true
 X-KDE-autostart-phase=2
 DESKTOPEOF
 echo "    Installed: $AUTOSTART_FILE"
+
+# ── Step 8: Application menu entry ───────────────────────────────────────────
+
+step "Installing KDE application menu entry..."
+mkdir -p "$APPS_DIR"
+cat > "$APPS_FILE" << APPSEOF
+[Desktop Entry]
+Type=Application
+Name=KeyMacro
+GenericName=Gaming Peripheral Macro Manager
+Comment=Map and automate gaming peripheral buttons
+Exec=$LAUNCHER
+Icon=input-gaming
+Categories=Utility;Game;
+Keywords=macro;keyboard;mouse;gaming;G13;G600;logitech;
+StartupNotify=false
+APPSEOF
+update-desktop-database "$APPS_DIR" 2>/dev/null || true
+echo "    Installed: $APPS_FILE"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 

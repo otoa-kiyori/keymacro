@@ -19,6 +19,7 @@ RULES_DST_DIR="/etc/udev/rules.d"
 MODULES_FILE="/etc/modules-load.d/keymacro.conf"
 LAUNCHER="$HOME/bin/keymacro"
 AUTOSTART_FILE="$HOME/.config/autostart/keymacro.desktop"
+APPS_FILE="$HOME/.local/share/applications/keymacro.desktop"
 
 TOTAL_STEPS=6
 STEP=0
@@ -62,12 +63,19 @@ echo "    OK — sudo credentials cached for this session."
 
 # ── Step 2: Autostart entry ───────────────────────────────────────────────────
 
-step "Removing KDE autostart entry..."
+step "Removing KDE autostart and application menu entries..."
 if [ -f "$AUTOSTART_FILE" ]; then
     rm "$AUTOSTART_FILE"
     echo "    Removed: $AUTOSTART_FILE"
 else
     echo "    $AUTOSTART_FILE not found — skipping."
+fi
+if [ -f "$APPS_FILE" ]; then
+    rm "$APPS_FILE"
+    update-desktop-database "$(dirname "$APPS_FILE")" 2>/dev/null || true
+    echo "    Removed: $APPS_FILE"
+else
+    echo "    $APPS_FILE not found — skipping."
 fi
 
 # ── Step 3: Launcher script ───────────────────────────────────────────────────
