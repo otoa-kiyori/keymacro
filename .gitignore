@@ -1,2 +1,20 @@
+# Python
 *.pyc
 **/__pycache__
+
+# Virtual environment
+.venv/
+
+# Test cache
+.pytest_cache/
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
