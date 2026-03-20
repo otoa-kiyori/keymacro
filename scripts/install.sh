@@ -78,7 +78,7 @@ done
 # ── Step 3: udev rules ────────────────────────────────────────────────────────
 
 step "Installing udev rules..."
-sudo install -m 644 "$REPO_ROOT/udev/99-keymacro.rules" "$RULES_DST_DIR/"
+sudo install -m 644 "$REPO_ROOT/scripts/99-keymacro.rules" "$RULES_DST_DIR/"
 echo "    Installed: $RULES_DST_DIR/99-keymacro.rules"
 
 for rules_file in "$REPO_ROOT"/plugins/*/99-keymacro-*.rules; do

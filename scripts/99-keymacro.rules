@@ -6,11 +6,7 @@
 #   plugins/g600/99-keymacro-g600.rules
 #
 # Install everything with:
-#   bash scripts/install-udev-rules.sh
-#
-# Group membership required:
-#   sudo usermod -aG input,plugdev $USER
-#   Then log out and back in.
+#   bash scripts/install.sh
 
 # /dev/uinput — virtual input device creation (needed by all plugins)
 KERNEL=="uinput", GROUP="input", MODE="0660"
