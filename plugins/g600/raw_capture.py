@@ -1,13 +1,20 @@
 """
 plugins/g600/raw_capture.py — Pure evdev capture for the Logitech G600.
 
-Opens and exclusively grabs every interface listed in buttons.csv.
-The device names in the CSV are the exact by-id suffix strings
-(e.g. "event-mouse", "if01-event-kbd", "event-if01"); the serial-number
-portion is wildcarded so the code works on any G600 unit.
+Opens every interface listed in buttons.csv.  The device names in the CSV
+are the exact by-id suffix strings (e.g. "event-mouse", "if01-event-kbd",
+"event-if01"); the serial-number portion is wildcarded so the code works
+on any G600 unit.
 
 Signal detection uses (device_suffix, ev_type, ev_code / bitmask) directly
 from the CSV — no name translation layer.
+
+UInput is decoupled from capture: the thread opens the evdev interfaces and
+fires raw callbacks immediately, regardless of /dev/uinput availability.
+The exclusive grab (and therefore passthrough) is only enabled once UInput
+is successfully created — until then the OS still sees all mouse events.
+UInput is retried via ensure_capture() at startup and every _UINPUT_RETRY_S
+seconds from the event loop.
 
 No external daemon or system service required.
 """
@@ -38,6 +45,8 @@ _MOUSE_GLOB = _BY_ID_PREFIX + "event-mouse"
 _KBD_GLOB   = _BY_ID_PREFIX + "if01-event-kbd"
 _IF01_GLOB  = _BY_ID_PREFIX + "event-if01"
 
+_UINPUT_RETRY_S = 5.0  # retry /dev/uinput every N seconds if unavailable at startup
+
 
 def _find_device(suffix: str) -> str:
     """Return the first by-id path matching the given suffix, or raise."""
@@ -57,10 +66,14 @@ class G600RawCapture(threading.Thread):
     Devices opened are determined entirely by buttons.csv — no hardcoding
     in Python.  Adding a new interface only requires a new row in the CSV.
 
+    UInput is non-fatal: the thread opens evdev devices and fires raw
+    callbacks immediately.  Exclusive grab and macro execution only begin
+    once UInput is successfully created (ensure_capture() / event loop retry).
+
     Profile switch:  call update_routing_map() from any thread — instant,
                      no restart needed.
 
-    routing map: {button_id: (press_macro, release_macro)}
+    routing map: {button_id: NamedMacro}
     """
 
     def __init__(self) -> None:
@@ -79,7 +92,8 @@ class G600RawCapture(threading.Thread):
 
         # Opened devices: suffix → InputDevice
         self._devs: dict[str, "evdev.InputDevice"] = {}
-        self._uinput = None
+        self._uinput  = None   # evdev.UInput (None until /dev/uinput is ready)
+        self._grabbed = False  # True once evdev devices are exclusively grabbed
 
         # Per-device EV_ABS bitmask state
         self._abs_state: dict[str, int] = {}  # device_suffix → current bitmask
@@ -141,11 +155,47 @@ class G600RawCapture(threading.Thread):
             self._teardown()
 
     def _setup(self) -> None:
-        # Open every device named in the CSV
+        # Open every device named in the CSV — this is the only fatal step
         for suffix in DEVICE_NAMES:
             self._devs[suffix] = evdev.InputDevice(_find_device(suffix))
 
-        # Collect capabilities for the uinput virtual device
+        # UInput + grab are non-fatal — capture (raw callbacks) starts regardless.
+        # ensure_capture() tries up to 10 times so a recently-loaded uinput
+        # module is picked up without a full restart.
+        self.ensure_capture()
+
+    def ensure_capture(self) -> None:
+        """Try to create UInput and grab devices up to 10 times, sleeping 1 s
+        between attempts.  Logs success or final failure to stdout.
+
+        Non-fatal: raw button callbacks and the debug window work regardless
+        of the outcome.  Without UInput the OS still sees all mouse events.
+        Macros and exclusive grab begin as soon as UInput becomes ready.
+        """
+        for attempt in range(1, 11):
+            self._try_create_uinput()
+            if self._uinput is not None:
+                print(f"[G600] UInput ready (attempt {attempt}/10)", flush=True)
+                return
+            print(f"[G600] UInput not ready (attempt {attempt}/10) — "
+                  "retrying in 1 s...", flush=True)
+            if attempt < 10:
+                time.sleep(1.0)
+        print("[G600] UInput unavailable after 10 attempts — "
+              "macros disabled.  Run: sudo modprobe uinput", flush=True)
+
+    def _try_create_uinput(self) -> None:
+        """Single attempt to create the UInput virtual device and grab all real
+        devices exclusively.
+
+        If /dev/uinput is unavailable: leaves self._uinput = None and
+        self._grabbed = False — devices remain open but un-grabbed so the OS
+        still sees mouse events.
+
+        Called by ensure_capture() and retried every _UINPUT_RETRY_S seconds
+        from the event loop.
+        """
+        # Collect capabilities from already-open devices
         key_codes: set[int] = set()
         rel_codes: set[int] = set()
         for dev in self._devs.values():
@@ -163,14 +213,17 @@ class G600RawCapture(threading.Thread):
         ):
             key_codes.add(code)
 
-        self._uinput = UInput(
-            {ecodes.EV_KEY: sorted(key_codes), ecodes.EV_REL: sorted(rel_codes)},
-            name="g600-keymacro",
-            vendor=0x046d,
-            product=0xc24a,
-        )
+        try:
+            uinput = UInput(
+                {ecodes.EV_KEY: sorted(key_codes), ecodes.EV_REL: sorted(rel_codes)},
+                name="g600-keymacro",
+                vendor=0x046d,
+                product=0xc24a,
+            )
+        except Exception:
+            return  # /dev/uinput not available yet — try again later
 
-        # Grab all devices exclusively — grab earlier ones if a later one fails
+        # UInput succeeded; now exclusively grab the real devices
         grabbed: list["evdev.InputDevice"] = []
         try:
             for dev in self._devs.values():
@@ -178,9 +231,15 @@ class G600RawCapture(threading.Thread):
                 grabbed.append(dev)
         except OSError:
             for d in grabbed:
-                try: d.ungrab()
-                except Exception: pass
-            raise
+                try:
+                    d.ungrab()
+                except Exception:
+                    pass
+            uinput.close()
+            return  # grab failed — don't commit
+
+        self._uinput  = uinput
+        self._grabbed = True
 
     @staticmethod
     def _grab(dev: "evdev.InputDevice") -> None:
@@ -194,11 +253,13 @@ class G600RawCapture(threading.Thread):
                 time.sleep(0.25)
 
     def _teardown(self) -> None:
+        if self._grabbed:
+            for dev in self._devs.values():
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass
         for dev in self._devs.values():
-            try:
-                dev.ungrab()
-            except Exception:
-                pass
             try:
                 dev.close()   # sets dev.fd = -1; must always run so __del__ is a no-op
             except Exception:
@@ -214,8 +275,19 @@ class G600RawCapture(threading.Thread):
     def _event_loop(self) -> None:
         fd_to_suffix = {dev.fd: suffix for suffix, dev in self._devs.items()}
         fds = list(fd_to_suffix)
+        _last_uinput_try = 0.0
 
         while not self._stop_event.is_set():
+            # Retry uinput + grab if they weren't available at startup
+            if self._uinput is None:
+                now = time.monotonic()
+                if now - _last_uinput_try >= _UINPUT_RETRY_S:
+                    _last_uinput_try = now
+                    self._try_create_uinput()
+                    if self._uinput is not None:
+                        print("[G600] UInput became available — "
+                              "grab active, macros enabled", flush=True)
+
             r, _, _ = select.select(fds, [], [], 0.1)
             for fd in r:
                 suffix = fd_to_suffix[fd]
@@ -246,21 +318,22 @@ class G600RawCapture(threading.Thread):
                 if dev != device or not (changed & mask):
                     continue
                 pressed = bool(event.value & mask)
-                print(f"[DBG2-G600-ABS] {defn.button_id} pressed={pressed}  cb={'set' if cb else 'NONE'}", flush=True)
                 if cb:
                     try:
                         cb(defn.button_id, pressed)
                     except Exception as e:
-                        print(f"[DBG2-G600-ABS] cb RAISED: {e!r}", flush=True)
+                        print(f"[G600] ABS callback raised: {e!r}", flush=True)
                 macro = routing.get((device, mask))
-                if macro is not None:
+                if macro is not None and self._uinput is not None:
                     q.submit_macro(defn.button_id, pressed, macro, self._uinput)
                 # ABS buttons have no OS passthrough — swallow if unrouted
             return
 
         # ── EV_KEY buttons (event-mouse, if01-event-kbd) ─────────────────────
         if event.type != ecodes.EV_KEY:
-            self._uinput.write(event.type, event.code, event.value)  # REL/SYN passthrough
+            # REL/SYN passthrough — only if UInput (and grab) is active
+            if self._uinput is not None:
+                self._uinput.write(event.type, event.code, event.value)
             return
 
         defn = KEY_BTNS.get((device, event.code))
@@ -269,11 +342,6 @@ class G600RawCapture(threading.Thread):
             cb    = self._raw_cb
             debug = self._debug_mode
 
-        # Only trace press/release (value 0/1), not key-repeat (value 2)
-        if event.value in (0, 1):
-            label = defn.button_id if defn else f"?{device}:{event.code}"
-            print(f"[DBG2-G600-KEY] {label} val={event.value}  cb={'set' if cb else 'NONE'}", flush=True)
-
         if cb:
             if defn and event.value in (defn.press_value, defn.release_value):
                 # Known button — report with its label
@@ -281,21 +349,22 @@ class G600RawCapture(threading.Thread):
                 try:
                     cb(defn.button_id, pressed)
                 except Exception as e:
-                    print(f"[DBG2-G600-KEY] cb RAISED: {e!r}", flush=True)
+                    print(f"[G600] KEY callback raised: {e!r}", flush=True)
             elif not defn and event.value in (0, 1):
                 # Unknown button — report with raw info so debug window can surface it
                 pressed = bool(event.value)
                 try:
                     cb(f"?{device}:EV_KEY:{event.code}", pressed)
                 except Exception as e:
-                    print(f"[DBG2-G600-KEY] cb RAISED (unknown): {e!r}", flush=True)
+                    print(f"[G600] KEY callback raised (unknown): {e!r}", flush=True)
 
         if macro is None:
             # In debug mode, suppress non-locked buttons so they don't fire
             # stray key codes into the OS.  Locked buttons (LMB, RMB) always
             # pass through so the mouse remains functional while debugging.
             if not debug or (defn is not None and defn.locked):
-                self._uinput.write(event.type, event.code, event.value)
+                if self._uinput is not None:
+                    self._uinput.write(event.type, event.code, event.value)
             return
 
         # Macro-routed: intercept press and release, ignore repeat (value==2)
@@ -303,6 +372,8 @@ class G600RawCapture(threading.Thread):
         release_val = defn.release_value if defn else 0
 
         if event.value == press_val:
-            q.submit_macro(defn.button_id if defn else "", True,  macro, self._uinput)
+            if self._uinput is not None:
+                q.submit_macro(defn.button_id if defn else "", True,  macro, self._uinput)
         elif event.value == release_val:
-            q.submit_macro(defn.button_id if defn else "", False, macro, self._uinput)
+            if self._uinput is not None:
+                q.submit_macro(defn.button_id if defn else "", False, macro, self._uinput)

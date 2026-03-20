@@ -20,7 +20,6 @@ Button down and up:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -102,7 +101,7 @@ class G13Plugin(DevicePlugin):
     # ── Availability ──────────────────────────────────────────────────────────
 
     def is_available(self) -> bool:
-        return _USB_OK and _EVDEV_OK and _g13_present() and os.access("/dev/uinput", os.W_OK)
+        return _USB_OK and _EVDEV_OK and _g13_present()
 
     def get_install_hint(self) -> str:
         parts = []
@@ -120,13 +119,6 @@ class G13Plugin(DevicePlugin):
             )
         if _USB_OK and _EVDEV_OK and not _g13_present():
             parts.append("G13 not detected — is it plugged in?")
-        if not os.access("/dev/uinput", os.W_OK):
-            parts.append(
-                "/dev/uinput is not writable.\n"
-                "  Run: sudo udevadm control --reload-rules "
-                "&& sudo udevadm trigger --name-match=uinput\n"
-                "  (udev rule already exists at /etc/udev/rules.d/99-uinput.rules)"
-            )
         if not parts:
             parts.append(
                 "G13 USB access may require a udev rule:\n"

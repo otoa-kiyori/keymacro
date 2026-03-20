@@ -14,8 +14,13 @@ Report format (8 bytes):
 Public API matches G600's raw_capture.py:
     start()                      begin capture thread
     stop()                       request stop
-    update_routing_map(routing)  {button_id: (press_macro, release_macro)}
+    update_routing_map(routing)  {button_id: NamedMacro}
     set_raw_callback(fn)         fn(button_id, pressed) on every event
+
+UInput is decoupled from capture: the thread starts and fires button
+callbacks regardless of whether /dev/uinput is available.  UInput is
+attempted at startup and retried every _UINPUT_RETRY_S seconds; macros
+are silently skipped until it succeeds.
 
 Dependencies: pyusb  (pip install pyusb / sudo apt install python3-usb)
               evdev  (pip install evdev  / sudo apt install python3-evdev)
@@ -24,6 +29,7 @@ Dependencies: pyusb  (pip install pyusb / sudo apt install python3-usb)
 from __future__ import annotations
 
 import threading
+import time
 
 try:
     import usb.core
@@ -55,6 +61,8 @@ MAX_PACKET  = 64   # G13 batches multiple 8-byte reports per USB read
 STICK_LOW  = 50    # axis value below this  → UP or LEFT
 STICK_HIGH = 205   # axis value above this  → DOWN or RIGHT
 
+_UINPUT_RETRY_S = 5.0  # retry /dev/uinput every N seconds if unavailable at startup
+
 
 class G13RawCapture(threading.Thread):
     """
@@ -63,10 +71,15 @@ class G13RawCapture(threading.Thread):
     Button definitions come entirely from buttons.csv via button_map.
     No button names, bit indices, or axis thresholds are hardcoded here.
 
+    UInput is non-fatal: the thread starts and fires raw callbacks
+    (e.g. the debug window) immediately, regardless of /dev/uinput
+    availability.  Macro execution resumes automatically once UInput
+    becomes available.
+
     Profile switch: call update_routing_map() from any thread — instant,
                     no restart needed.
 
-    routing map: {button_id: (press_macro, release_macro)}
+    routing map: {button_id: NamedMacro}
     """
 
     def __init__(self) -> None:
@@ -91,7 +104,7 @@ class G13RawCapture(threading.Thread):
         self._raw_cb     = None
 
         self._dev    = None   # usb.core.Device
-        self._uinput = None   # evdev.UInput
+        self._uinput = None   # evdev.UInput  (None until /dev/uinput is ready)
 
         # Previous state
         self._prev_bits  = 0
@@ -148,19 +161,52 @@ class G13RawCapture(threading.Thread):
         self._dev.set_configuration()
         usb.util.claim_interface(self._dev, G13_IFACE)
 
-        key_codes: set[int] = set()
-        for code in range(ecodes.KEY_ESC, ecodes.KEY_MICMUTE + 1):
-            key_codes.add(code)
-        for btn in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE,
-                    ecodes.BTN_SIDE, ecodes.BTN_EXTRA):
-            key_codes.add(btn)
+        # UInput is non-fatal — capture starts immediately regardless.
+        # ensure_capture() tries up to 10 times so a recently-loaded uinput
+        # module is picked up without a full restart.
+        self.ensure_capture()
 
-        self._uinput = UInput(
-            {ecodes.EV_KEY: sorted(key_codes)},
-            name="g13-keymacro",
-            vendor=G13_VENDOR,
-            product=G13_PRODUCT,
-        )
+    def ensure_capture(self) -> None:
+        """Try to create the UInput device up to 10 times, sleeping 1 s between
+        attempts.  Logs success or final failure to stdout.
+
+        Non-fatal: raw button callbacks and the debug window work regardless.
+        Macros begin firing as soon as UInput becomes ready.
+        """
+        for attempt in range(1, 11):
+            self._try_create_uinput()
+            if self._uinput is not None:
+                print(f"[G13] UInput ready (attempt {attempt}/10)", flush=True)
+                return
+            print(f"[G13] UInput not ready (attempt {attempt}/10) — "
+                  "retrying in 1 s...", flush=True)
+            if attempt < 10:
+                import time as _t; _t.sleep(1.0)
+        print("[G13] UInput unavailable after 10 attempts — "
+              "macros disabled.  Run: sudo modprobe uinput", flush=True)
+
+    def _try_create_uinput(self) -> None:
+        """Single attempt to open /dev/uinput and create the virtual keyboard device.
+
+        Silently leaves self._uinput = None on failure (e.g. uinput module
+        not loaded yet).  Called by ensure_capture() and retried every
+        _UINPUT_RETRY_S seconds from the event loop.
+        """
+        try:
+            key_codes: set[int] = set()
+            for code in range(ecodes.KEY_ESC, ecodes.KEY_MICMUTE + 1):
+                key_codes.add(code)
+            for btn in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE,
+                        ecodes.BTN_SIDE, ecodes.BTN_EXTRA):
+                key_codes.add(btn)
+            self._uinput = UInput(
+                {ecodes.EV_KEY: sorted(key_codes)},
+                name="g13-keymacro",
+                vendor=G13_VENDOR,
+                product=G13_PRODUCT,
+            )
+        except Exception:
+            self._uinput = None
 
     def _teardown(self) -> None:
         try:
@@ -178,7 +224,16 @@ class G13RawCapture(threading.Thread):
     # ── Event loop ────────────────────────────────────────────────────────────
 
     def _event_loop(self) -> None:
+        _last_uinput_try = 0.0
+
         while not self._stop_event.is_set():
+            # Retry uinput if it wasn't available at startup
+            if self._uinput is None:
+                now = time.monotonic()
+                if now - _last_uinput_try >= _UINPUT_RETRY_S:
+                    _last_uinput_try = now
+                    self._try_create_uinput()
+
             try:
                 data = self._dev.read(G13_EP_IN, MAX_PACKET, timeout=100)
             except usb.core.USBTimeoutError:
@@ -239,13 +294,12 @@ class G13RawCapture(threading.Thread):
             cb    = self._raw_cb
             macro = self._routing.get(button_id)
 
-        print(f"[DBG2-G13] {button_id} pressed={pressed}  cb={'set' if cb else 'NONE'}", flush=True)
-
         if cb:
             try:
                 cb(button_id, pressed)
             except Exception as e:
-                print(f"[DBG2-G13] cb RAISED: {e!r}", flush=True)
+                print(f"[G13] raw callback raised: {e!r}", flush=True)
 
-        if macro is not None:
+        # Only submit macros when uinput is ready; silently skip otherwise
+        if macro is not None and self._uinput is not None:
             get_queue().submit_macro(button_id, pressed, macro, self._uinput)
