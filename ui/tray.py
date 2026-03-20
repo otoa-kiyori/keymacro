@@ -133,4 +133,4 @@ class KMTrayIcon(QSystemTrayIcon):
 
     def _on_status_message(self, msg: str) -> None:
         if msg != "open_window":
-            self.showMessage("keymacro", msg, QSystemTrayIcon.MessageIcon.Information, 2000)
+            self.showMessage("keymacro", msg, QSystemTrayIcon.MessageIcon.Information, 5000)
