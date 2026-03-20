@@ -44,7 +44,10 @@ else
     echo "    $MODULES_FILE already exists — skipping."
 fi
 
+echo "==> Adding $USER to input and plugdev groups..."
+sudo usermod -aG input,plugdev "$USER"
+echo "    Done."
+
 echo ""
-echo "==> Done!  Ensure your user is in the required groups:"
-echo "    sudo usermod -aG input,plugdev \$USER"
-echo "    Then log out and back in for group changes to take effect."
+echo "==> All done!"
+echo "    IMPORTANT: Log out and back in for group changes to take effect."
