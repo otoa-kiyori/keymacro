@@ -169,15 +169,10 @@ class G600RawCapture(threading.Thread):
         # _UINPUT_RETRY_S seconds.  ensure_capture() (8 retries × 0.5 s) is
         # available for callers that want to block-wait (e.g. the debug script).
         self._try_create_uinput()
-        if self._uinput is not None:
-            print("[G600] UInput ready at startup", flush=True)
-        else:
-            print("[G600] UInput not ready at startup — will retry in event loop. "
-                  "Run: sudo modprobe uinput", flush=True)
 
     def ensure_capture(self) -> None:
         """Block-wait for UInput: retry up to 8 times with 0.5 s sleep between
-        attempts, then log success or final failure to stdout.
+        attempts.  Prints to stdout only on final failure.
 
         Intended for standalone scripts (debug_g600.py) that want to wait for
         UInput to become ready.  The plugin itself uses the non-blocking
@@ -186,10 +181,7 @@ class G600RawCapture(threading.Thread):
         for attempt in range(1, 9):
             self._try_create_uinput()
             if self._uinput is not None:
-                print(f"[G600] UInput ready (attempt {attempt}/8)", flush=True)
                 return
-            print(f"[G600] UInput not ready (attempt {attempt}/8) — "
-                  "retrying in 0.5 s...", flush=True)
             if attempt < 8:
                 time.sleep(0.5)
         print("[G600] UInput unavailable after 8 attempts — "
@@ -300,9 +292,7 @@ class G600RawCapture(threading.Thread):
                 if now - _last_uinput_try >= _UINPUT_RETRY_S:
                     _last_uinput_try = now
                     self._try_create_uinput()
-                    if self._uinput is not None:
-                        print("[G600] UInput became available — "
-                              "grab active, macros enabled", flush=True)
+                    pass  # uinput became available; macros now active
 
             r, _, _ = select.select(fds, [], [], 0.1)
             for fd in r:
