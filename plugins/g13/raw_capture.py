@@ -161,17 +161,23 @@ class G13RawCapture(threading.Thread):
         self._dev.set_configuration()
         usb.util.claim_interface(self._dev, G13_IFACE)
 
-        # UInput is non-fatal — capture starts immediately regardless.
-        # ensure_capture() tries up to 10 times so a recently-loaded uinput
-        # module is picked up without a full restart.
-        self.ensure_capture()
+        # Single non-blocking attempt at startup; the event loop retries every
+        # _UINPUT_RETRY_S seconds.  ensure_capture() (10 retries × 1 s) is
+        # available for callers that want to block-wait (e.g. the debug script).
+        self._try_create_uinput()
+        if self._uinput is not None:
+            print("[G13] UInput ready at startup", flush=True)
+        else:
+            print("[G13] UInput not ready at startup — will retry in event loop. "
+                  "Run: sudo modprobe uinput", flush=True)
 
     def ensure_capture(self) -> None:
-        """Try to create the UInput device up to 10 times, sleeping 1 s between
-        attempts.  Logs success or final failure to stdout.
+        """Block-wait for UInput: retry up to 10 times with 1 s sleep between
+        attempts, then log success or final failure to stdout.
 
-        Non-fatal: raw button callbacks and the debug window work regardless.
-        Macros begin firing as soon as UInput becomes ready.
+        Intended for standalone scripts (debug_g13.py) that want to wait for
+        UInput to become ready.  The plugin itself uses the non-blocking
+        event-loop retry instead.
         """
         for attempt in range(1, 11):
             self._try_create_uinput()
@@ -181,7 +187,7 @@ class G13RawCapture(threading.Thread):
             print(f"[G13] UInput not ready (attempt {attempt}/10) — "
                   "retrying in 1 s...", flush=True)
             if attempt < 10:
-                import time as _t; _t.sleep(1.0)
+                time.sleep(1.0)
         print("[G13] UInput unavailable after 10 attempts — "
               "macros disabled.  Run: sudo modprobe uinput", flush=True)
 

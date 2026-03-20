@@ -47,6 +47,12 @@ _IF01_GLOB  = _BY_ID_PREFIX + "event-if01"
 
 _UINPUT_RETRY_S = 5.0  # retry /dev/uinput every N seconds if unavailable at startup
 
+# Only these interfaces produce G-key events that need exclusive interception.
+# "event-mouse" is intentionally excluded: LMB/RMB/movement must reach the
+# Wayland compositor directly via the physical device — grabbing it and
+# relaying through a uinput virtual device does not work reliably on Wayland.
+_GRAB_SUFFIXES: frozenset[str] = frozenset({"if01-event-kbd", "event-if01"})
+
 
 def _find_device(suffix: str) -> str:
     """Return the first by-id path matching the given suffix, or raise."""
@@ -159,18 +165,23 @@ class G600RawCapture(threading.Thread):
         for suffix in DEVICE_NAMES:
             self._devs[suffix] = evdev.InputDevice(_find_device(suffix))
 
-        # UInput + grab are non-fatal — capture (raw callbacks) starts regardless.
-        # ensure_capture() tries up to 10 times so a recently-loaded uinput
-        # module is picked up without a full restart.
-        self.ensure_capture()
+        # Single non-blocking attempt at startup; the event loop retries every
+        # _UINPUT_RETRY_S seconds.  ensure_capture() (10 retries × 1 s) is
+        # available for callers that want to block-wait (e.g. the debug script).
+        self._try_create_uinput()
+        if self._uinput is not None:
+            print("[G600] UInput ready at startup", flush=True)
+        else:
+            print("[G600] UInput not ready at startup — will retry in event loop. "
+                  "Run: sudo modprobe uinput", flush=True)
 
     def ensure_capture(self) -> None:
-        """Try to create UInput and grab devices up to 10 times, sleeping 1 s
-        between attempts.  Logs success or final failure to stdout.
+        """Block-wait for UInput: retry up to 10 times with 1 s sleep between
+        attempts, then log success or final failure to stdout.
 
-        Non-fatal: raw button callbacks and the debug window work regardless
-        of the outcome.  Without UInput the OS still sees all mouse events.
-        Macros and exclusive grab begin as soon as UInput becomes ready.
+        Intended for standalone scripts (debug_g600.py) that want to wait for
+        UInput to become ready.  The plugin itself uses the non-blocking
+        event-loop retry instead.
         """
         for attempt in range(1, 11):
             self._try_create_uinput()
@@ -185,25 +196,29 @@ class G600RawCapture(threading.Thread):
               "macros disabled.  Run: sudo modprobe uinput", flush=True)
 
     def _try_create_uinput(self) -> None:
-        """Single attempt to create the UInput virtual device and grab all real
-        devices exclusively.
+        """Single attempt to create the UInput virtual device and grab only the
+        G-key interfaces (_GRAB_SUFFIXES).
+
+        "event-mouse" is intentionally NOT grabbed — LMB/RMB/movement reach
+        the Wayland compositor directly via the physical device.  The grab is
+        only needed for G-key interfaces to prevent their raw key codes from
+        leaking to other apps.
 
         If /dev/uinput is unavailable: leaves self._uinput = None and
-        self._grabbed = False — devices remain open but un-grabbed so the OS
-        still sees mouse events.
+        self._grabbed = False — devices remain open but un-grabbed.
 
-        Called by ensure_capture() and retried every _UINPUT_RETRY_S seconds
-        from the event loop.
+        Called once at startup (_setup) and retried every _UINPUT_RETRY_S
+        seconds from the event loop.
         """
-        # Collect capabilities from already-open devices
+        # Collect capabilities only from grabbed interfaces (no REL — mouse
+        # movement is handled by the physical event-mouse, not relayed via uinput)
         key_codes: set[int] = set()
-        rel_codes: set[int] = set()
-        for dev in self._devs.values():
-            caps = dev.capabilities(verbose=False)
-            key_codes.update(caps.get(ecodes.EV_KEY, []))
-            rel_codes.update(caps.get(ecodes.EV_REL, []))
+        for suffix, dev in self._devs.items():
+            if suffix in _GRAB_SUFFIXES:
+                caps = dev.capabilities(verbose=False)
+                key_codes.update(caps.get(ecodes.EV_KEY, []))
 
-        # Ensure macro emission keys are available
+        # Ensure common macro emission keys are available
         for code in (
             ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE,
             ecodes.BTN_SIDE, ecodes.BTN_EXTRA, ecodes.BTN_FORWARD, ecodes.BTN_BACK,
@@ -215,7 +230,7 @@ class G600RawCapture(threading.Thread):
 
         try:
             uinput = UInput(
-                {ecodes.EV_KEY: sorted(key_codes), ecodes.EV_REL: sorted(rel_codes)},
+                {ecodes.EV_KEY: sorted(key_codes)},
                 name="g600-keymacro",
                 vendor=0x046d,
                 product=0xc24a,
@@ -223,12 +238,13 @@ class G600RawCapture(threading.Thread):
         except Exception:
             return  # /dev/uinput not available yet — try again later
 
-        # UInput succeeded; now exclusively grab the real devices
+        # UInput succeeded; exclusively grab only the G-key interfaces
         grabbed: list["evdev.InputDevice"] = []
         try:
-            for dev in self._devs.values():
-                self._grab(dev)
-                grabbed.append(dev)
+            for suffix, dev in self._devs.items():
+                if suffix in _GRAB_SUFFIXES:
+                    self._grab(dev)
+                    grabbed.append(dev)
         except OSError:
             for d in grabbed:
                 try:
@@ -329,10 +345,12 @@ class G600RawCapture(threading.Thread):
                 # ABS buttons have no OS passthrough — swallow if unrouted
             return
 
-        # ── EV_KEY buttons (event-mouse, if01-event-kbd) ─────────────────────
+        # ── EV_KEY / REL / SYN buttons (event-mouse, if01-event-kbd) ────────────
         if event.type != ecodes.EV_KEY:
-            # REL/SYN passthrough — only if UInput (and grab) is active
-            if self._uinput is not None:
+            # REL/SYN passthrough — only relay for grabbed interfaces.
+            # event-mouse is NOT grabbed, so its movement reaches the compositor
+            # via the physical device already; relaying would double the events.
+            if self._uinput is not None and device in _GRAB_SUFFIXES:
                 self._uinput.write(event.type, event.code, event.value)
             return
 
@@ -359,12 +377,13 @@ class G600RawCapture(threading.Thread):
                     print(f"[G600] KEY callback raised (unknown): {e!r}", flush=True)
 
         if macro is None:
-            # In debug mode, suppress non-locked buttons so they don't fire
-            # stray key codes into the OS.  Locked buttons (LMB, RMB) always
-            # pass through so the mouse remains functional while debugging.
-            if not debug or (defn is not None and defn.locked):
-                if self._uinput is not None:
-                    self._uinput.write(event.type, event.code, event.value)
+            # Only relay through uinput for grabbed interfaces.
+            # event-mouse (LMB, RMB) is not grabbed — those events already
+            # reach the compositor via the physical device.
+            if device in _GRAB_SUFFIXES:
+                if not debug or (defn is not None and defn.locked):
+                    if self._uinput is not None:
+                        self._uinput.write(event.type, event.code, event.value)
             return
 
         # Macro-routed: intercept press and release, ignore repeat (value==2)
