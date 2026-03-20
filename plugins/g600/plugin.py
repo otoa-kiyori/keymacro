@@ -12,6 +12,7 @@ Button→code mapping is hard-coded from hardware discovery (2026-03-18).
 from __future__ import annotations
 
 import glob
+import os
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -67,7 +68,7 @@ class G600Plugin(DevicePlugin):
         return "G600 via pure evdev — no external daemon required"
 
     def is_available(self) -> bool:
-        return _EVDEV_OK and _g600_present()
+        return _EVDEV_OK and _g600_present() and os.access("/dev/uinput", os.W_OK)
 
     def get_install_hint(self) -> str:
         if not _EVDEV_OK:
@@ -75,6 +76,13 @@ class G600Plugin(DevicePlugin):
                 "python3-evdev is required:\n"
                 "  pip install evdev\n"
                 "  or: sudo apt install python3-evdev"
+            )
+        if not os.access("/dev/uinput", os.W_OK):
+            return (
+                "/dev/uinput is not writable.\n"
+                "  Run: sudo udevadm control --reload-rules "
+                "&& sudo udevadm trigger --name-match=uinput\n"
+                "  (udev rule already exists at /etc/udev/rules.d/99-uinput.rules)"
             )
         return "G600 not detected — is it plugged in?"
 
