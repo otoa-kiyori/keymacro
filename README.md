@@ -188,6 +188,14 @@ keymacro/
 
 ---
 
+## Contributing
+
+keymacro is public domain — fork it, modify it, do whatever you want with it.
+
+There is no issue tracker, no PR reviews, and no maintenance commitments. If something doesn't work for you, fork it and make it yours. That's the spirit of The Unlicense.
+
+---
+
 ## Credits
 
 **KeyMacro** was conceived and directed by its author.
