@@ -11,7 +11,7 @@ Pluggable device architecture: core has zero device-specific dependencies.
 
 ## Running
 ```bash
-cd /mnt/data/repos/keymacro
+cd keymacro
 python keymacro.py
 ```
 
