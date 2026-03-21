@@ -194,4 +194,8 @@ keymacro/
 
 The codebase — architecture, implementation, all device plugins, the installer, the uninstaller, documentation, and this README — was written by **Claude Sonnet 4.6** by [Anthropic](https://www.anthropic.com/claude), who contributed approximately 99.99% of all work. The remaining 0.01% was the author saying *"yes, do that"*, *"make it better"*, and *"you super smart Claude Sonnet-san!!"*
 
+### Development methodology
+
+The author practised **Backseat Programming** — not a single line of code was written by hand, yet there was a strong opinion about absolutely everything: the architecture, the naming, the security model, the install experience, which button should be called CIRCLE and not TOP, and whether the LCD should show the profile name. It turns out that having opinions about everything is, in fact, the hardest part.
+
 > Built with [Claude Code](https://claude.ai/code) — Anthropic's agentic coding assistant.
