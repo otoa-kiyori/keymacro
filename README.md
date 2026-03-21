@@ -196,6 +196,6 @@ The codebase — architecture, implementation, all device plugins, the installer
 
 ### Development methodology
 
-The author practised **Backseat Programming** — not a single line of code was written by hand, yet there was a strong opinion about absolutely everything: the architecture, the naming, the security model, the install experience, which button should be called CIRCLE and not TOP, and whether the LCD should show the profile name. It turns out that having opinions about everything is, in fact, the hardest part.
+**Claude Sonnet 4.6 did all the work. Otoa just bossed around like a backseat driver.** 🚗
 
 > Built with [Claude Code](https://claude.ai/code) — Anthropic's agentic coding assistant.
