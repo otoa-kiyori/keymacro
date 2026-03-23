@@ -35,11 +35,25 @@ COLORS = {
 }
 
 
-def _key_style(bg: str, border: str) -> str:
+def _adjust_hex(hex_color: str, factor: float) -> str:
+    """Lighten (factor > 1.0) or darken (factor < 1.0) a #rrggbb color."""
+    h = hex_color.lstrip("#")
+    r = min(255, max(0, int(int(h[0:2], 16) * factor)))
+    g = min(255, max(0, int(int(h[2:4], 16) * factor)))
+    b = min(255, max(0, int(int(h[4:6], 16) * factor)))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _key_style_raised(bg: str, border: str) -> str:
+    highlight = _adjust_hex(bg, 1.30)
+    shadow    = _adjust_hex(border, 0.70)
     return f"""
         QPushButton {{
             background-color: {bg};
-            border: 1px solid {border};
+            border-top:    2px solid {highlight};
+            border-left:   2px solid {highlight};
+            border-bottom: 2px solid {shadow};
+            border-right:  2px solid {shadow};
             border-radius: 4px;
             color: {COLORS["text"]};
             font-family: 'Courier New', monospace;
@@ -51,19 +65,46 @@ def _key_style(bg: str, border: str) -> str:
             background-color: {border};
             border-color: {COLORS["highlight"]};
         }}
-        QPushButton:pressed {{
-            border: 2px solid {COLORS["highlight"]};
+    """
+
+
+def _key_style_sunken(bg: str, border: str) -> str:
+    highlight = _adjust_hex(bg, 1.30)
+    shadow    = _adjust_hex(border, 0.70)
+    bg_dark   = _adjust_hex(bg, 0.85)
+    return f"""
+        QPushButton {{
+            background-color: {bg_dark};
+            border-top:    2px solid {shadow};
+            border-left:   2px solid {shadow};
+            border-bottom: 2px solid {highlight};
+            border-right:  2px solid {highlight};
+            border-radius: 4px;
+            color: {COLORS["text"]};
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: 500;
+            padding-top: 3px; padding-left: 3px;
+            padding-bottom: 1px; padding-right: 1px;
         }}
     """
 
 
-_ZONE_STYLES = {
-    "g":       _key_style(COLORS["g_key"],       COLORS["g_key_border"]),
-    "m":       _key_style(COLORS["m_key"],       COLORS["m_key_border"]),
-    "l":       _key_style(COLORS["l_key"],       COLORS["l_key_border"]),
-    "stick":   _key_style(COLORS["stick"],       COLORS["stick_border"]),
-    "special": _key_style(COLORS["special"],     COLORS["special_border"]),
+_ZONE_STYLES_RAISED = {
+    "g":       _key_style_raised(COLORS["g_key"],       COLORS["g_key_border"]),
+    "m":       _key_style_raised(COLORS["m_key"],       COLORS["m_key_border"]),
+    "l":       _key_style_raised(COLORS["l_key"],       COLORS["l_key_border"]),
+    "stick":   _key_style_raised(COLORS["stick"],       COLORS["stick_border"]),
+    "special": _key_style_raised(COLORS["special"],     COLORS["special_border"]),
 }
+_ZONE_STYLES_SUNKEN = {
+    "g":       _key_style_sunken(COLORS["g_key"],       COLORS["g_key_border"]),
+    "m":       _key_style_sunken(COLORS["m_key"],       COLORS["m_key_border"]),
+    "l":       _key_style_sunken(COLORS["l_key"],       COLORS["l_key_border"]),
+    "stick":   _key_style_sunken(COLORS["stick"],       COLORS["stick_border"]),
+    "special": _key_style_sunken(COLORS["special"],     COLORS["special_border"]),
+}
+_ZONE_STYLES = _ZONE_STYLES_RAISED   # backwards-compat alias
 
 _KEY_DISPLAY = {
     "STICK_UP":    "↑",
@@ -76,7 +117,10 @@ _KEY_DISPLAY = {
 _STYLE_RESET = """
     QPushButton {
         background-color: #f5d0c8;
-        border: 1px solid #c84020;
+        border-top:    2px solid #f8e8e4;
+        border-left:   2px solid #f8e8e4;
+        border-bottom: 2px solid #8c2c16;
+        border-right:  2px solid #8c2c16;
         border-radius: 4px;
         color: #601000;
         font-family: 'Courier New', monospace;
@@ -86,10 +130,19 @@ _STYLE_RESET = """
     }
     QPushButton:hover {
         background-color: #e89080;
-        border-color: #a02000;
+        border-top:    2px solid #f0a090;
+        border-left:   2px solid #f0a090;
+        border-bottom: 2px solid #702010;
+        border-right:  2px solid #702010;
     }
     QPushButton:pressed {
-        border: 2px solid #c84020;
+        background-color: #d8b0a8;
+        border-top:    2px solid #8c2c16;
+        border-left:   2px solid #8c2c16;
+        border-bottom: 2px solid #f8e8e4;
+        border-right:  2px solid #f8e8e4;
+        padding-top: 3px; padding-left: 3px;
+        padding-bottom: 1px; padding-right: 1px;
     }
 """
 
@@ -104,15 +157,15 @@ def _zone_for(key: str) -> str:
 
 # ─── Layout geometry ──────────────────────────────────────────────────────────
 
-_GX = [18 + i * 81 for i in range(7)]   # 7 G-key columns
-_GW, _GH = 77, 42
-_LX = 114
-_LW = 90
-_LP = 94
+_GX = [21 + i * 93 for i in range(7)]   # 7 G-key columns (×1.15 scaled)
+_GW, _GH = 89, 42
+_LX = 131
+_LW = 104
+_LP = 108
 
 # (key_name, x, y, w, h)
 _KEY_POSITIONS = [
-    ("CIRCLE",  57,        32, 53, 44),
+    ("CIRCLE",  8,         32, 104, 32),
     ("L1",  _LX,        20, _LW, 32), ("L2", _LX+_LP,   20, _LW, 32),
     ("L3",  _LX+_LP*2,  20, _LW, 32), ("L4", _LX+_LP*3, 20, _LW, 32),
 
@@ -137,12 +190,12 @@ _KEY_POSITIONS = [
     ("G21", _GX[3], 244, _GW, _GH),
     ("G22", _GX[4], 244, _GW, _GH),
 
-    ("LEFT",        384, 296, 104, 34),
-    ("STICK_UP",    492, 296, 104, 34),
-    ("STICK_LEFT",  384, 334, 104, 34),
-    ("STICK_RIGHT", 492, 334, 104, 34),
-    ("STICK_DOWN",  438, 372, 104, 34),
-    ("BD",          438, 410, 104, 34),
+    ("LEFT",        441, 296, 120, 34),
+    ("STICK_UP",    565, 296, 120, 34),
+    ("STICK_LEFT",  441, 334, 120, 34),
+    ("STICK_RIGHT", 565, 334, 120, 34),
+    ("STICK_DOWN",  504, 372, 120, 34),
+    ("BD",          504, 410, 120, 34),
 ]
 
 
@@ -158,26 +211,31 @@ class G13Canvas(QWidget):
         super().__init__(parent)
         self._plugin_name = plugin_name
         self._signals = signals
-        self.setFixedSize(600, 452)
+        self.setFixedSize(690, 452)
         self.setStyleSheet(
             f"background-color: {COLORS['device']}; "
             "border-radius: 16px; border: 2px solid #aaaaaa;"
         )
         self.buttons: dict[str, QPushButton] = {}
+        self._current_raised: dict[str, str] = {}
         for key, x, y, w, h in _KEY_POSITIONS:
             btn = QPushButton(self)
             btn.setGeometry(x, y, w, h)
-            btn.setStyleSheet(_ZONE_STYLES[_zone_for(key)])
+            style = _ZONE_STYLES_RAISED[_zone_for(key)]
+            btn.setStyleSheet(style)
             btn.setToolTip(key)
             btn.clicked.connect(lambda checked, k=key: self._on_click(k))
             self.buttons[key] = btn
+            self._current_raised[key] = style
 
         # Reset button — bottom-left, below the G-key block
         reset_btn = QPushButton("↺ Reset", self)
-        reset_btn.setGeometry(8, 418, 100, 26)
+        reset_btn.setGeometry(8, 418, 115, 26)
         reset_btn.setStyleSheet(_STYLE_RESET)
         reset_btn.setToolTip("Hard-reset the G13 (USB cycle + restart capture)")
         reset_btn.clicked.connect(self._on_reset)
+
+        signals.button_event.connect(self._on_button_event)
 
     def _on_reset(self) -> None:
         self._signals.device_reset.emit(self._plugin_name)
@@ -185,17 +243,32 @@ class G13Canvas(QWidget):
     def _on_click(self, key: str) -> None:
         self._signals.button_clicked.emit(self._plugin_name, key)
 
+    def _on_button_event(self, plugin_name: str, button_id: str, pressed: bool) -> None:
+        if plugin_name != self._plugin_name:
+            return
+        btn = self.buttons.get(button_id)
+        if btn is None:
+            return
+        try:
+            if pressed:
+                btn.setStyleSheet(_ZONE_STYLES_SUNKEN[_zone_for(button_id)])
+            else:
+                btn.setStyleSheet(self._current_raised[button_id])
+        except RuntimeError:
+            pass  # canvas destroyed while capture thread still running
+
     def update_bindings(self, bindings: dict[str, str]) -> None:
         for key, btn in self.buttons.items():
             val = bindings.get(key, "")
             btn.setText(self._short_label(key, val))
             zone = _zone_for(key)
-            style = _ZONE_STYLES[zone]
+            style = _ZONE_STYLES_RAISED[zone]
             if not val:
                 style = style.replace(
                     f"color: {COLORS['text']}", f"color: {COLORS['text_dim']}"
                 )
             btn.setStyleSheet(style)
+            self._current_raised[key] = style
 
     @staticmethod
     def _short_label(key: str, val: str) -> str:

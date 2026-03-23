@@ -35,11 +35,25 @@ COLORS = {
 }
 
 
-def _key_style(bg: str, border: str) -> str:
+def _adjust_hex(hex_color: str, factor: float) -> str:
+    """Lighten (factor > 1.0) or darken (factor < 1.0) a #rrggbb color."""
+    h = hex_color.lstrip("#")
+    r = min(255, max(0, int(int(h[0:2], 16) * factor)))
+    g = min(255, max(0, int(int(h[2:4], 16) * factor)))
+    b = min(255, max(0, int(int(h[4:6], 16) * factor)))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _key_style_raised(bg: str, border: str) -> str:
+    highlight = _adjust_hex(bg, 1.30)
+    shadow    = _adjust_hex(border, 0.70)
     return f"""
         QPushButton {{
             background-color: {bg};
-            border: 1px solid {border};
+            border-top:    2px solid {highlight};
+            border-left:   2px solid {highlight};
+            border-bottom: 2px solid {shadow};
+            border-right:  2px solid {shadow};
             border-radius: 4px;
             color: {COLORS["text"]};
             font-family: 'Courier New', monospace;
@@ -51,19 +65,46 @@ def _key_style(bg: str, border: str) -> str:
             background-color: {border};
             border-color: {COLORS["highlight"]};
         }}
-        QPushButton:pressed {{
-            border: 2px solid {COLORS["highlight"]};
+    """
+
+
+def _key_style_sunken(bg: str, border: str) -> str:
+    highlight = _adjust_hex(bg, 1.30)
+    shadow    = _adjust_hex(border, 0.70)
+    bg_dark   = _adjust_hex(bg, 0.85)
+    return f"""
+        QPushButton {{
+            background-color: {bg_dark};
+            border-top:    2px solid {shadow};
+            border-left:   2px solid {shadow};
+            border-bottom: 2px solid {highlight};
+            border-right:  2px solid {highlight};
+            border-radius: 4px;
+            color: {COLORS["text"]};
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            font-weight: 500;
+            padding-top: 3px; padding-left: 3px;
+            padding-bottom: 1px; padding-right: 1px;
         }}
     """
 
 
-_ZONE_STYLES = {
-    "main":       _key_style(COLORS["main"],       COLORS["main_border"]),
-    "thumb":      _key_style(COLORS["thumb"],      COLORS["thumb_border"]),
-    "thumb_gs":   _key_style(COLORS["thumb_gs"],   COLORS["thumb_gs_border"]),
-    "control":    _key_style(COLORS["control"],    COLORS["control_border"]),
-    "control_gs": _key_style(COLORS["control_gs"], COLORS["control_gs_border"]),
+_ZONE_STYLES_RAISED = {
+    "main":       _key_style_raised(COLORS["main"],       COLORS["main_border"]),
+    "thumb":      _key_style_raised(COLORS["thumb"],      COLORS["thumb_border"]),
+    "thumb_gs":   _key_style_raised(COLORS["thumb_gs"],   COLORS["thumb_gs_border"]),
+    "control":    _key_style_raised(COLORS["control"],    COLORS["control_border"]),
+    "control_gs": _key_style_raised(COLORS["control_gs"], COLORS["control_gs_border"]),
 }
+_ZONE_STYLES_SUNKEN = {
+    "main":       _key_style_sunken(COLORS["main"],       COLORS["main_border"]),
+    "thumb":      _key_style_sunken(COLORS["thumb"],      COLORS["thumb_border"]),
+    "thumb_gs":   _key_style_sunken(COLORS["thumb_gs"],   COLORS["thumb_gs_border"]),
+    "control":    _key_style_sunken(COLORS["control"],    COLORS["control_border"]),
+    "control_gs": _key_style_sunken(COLORS["control_gs"], COLORS["control_gs_border"]),
+}
+_ZONE_STYLES = _ZONE_STYLES_RAISED   # backwards-compat alias
 
 # Buttons that must never be reassigned (primary mouse clicks).
 # They are shown locked with a distinct style and cannot be clicked.
@@ -75,7 +116,10 @@ _LOCKED_LABELS: dict[str, str] = {
 _STYLE_LOCKED = f"""
     QPushButton {{
         background-color: #e0e0e0;
-        border: 1px dashed #999999;
+        border-top:    2px solid #f0f0f0;
+        border-left:   2px solid #f0f0f0;
+        border-bottom: 2px solid #999999;
+        border-right:  2px solid #999999;
         border-radius: 4px;
         color: #888888;
         font-family: 'Courier New', monospace;
@@ -89,6 +133,27 @@ _STYLE_LOCKED = f"""
     }}
 """
 
+_STYLE_LOCKED_SUNKEN = f"""
+    QPushButton {{
+        background-color: #cccccc;
+        border-top:    2px solid #999999;
+        border-left:   2px solid #999999;
+        border-bottom: 2px solid #f0f0f0;
+        border-right:  2px solid #f0f0f0;
+        border-radius: 4px;
+        color: #666666;
+        font-family: 'Courier New', monospace;
+        font-size: 10px;
+        font-weight: 500;
+        padding-top: 3px; padding-left: 3px;
+        padding-bottom: 1px; padding-right: 1px;
+    }}
+    QPushButton:disabled {{
+        background-color: #cccccc;
+        color: #666666;
+    }}
+"""
+
 
 def _dimmed(style: str) -> str:
     return style.replace(f"color: {COLORS['text']}", f"color: {COLORS['text_dim']}")
@@ -97,7 +162,10 @@ def _dimmed(style: str) -> str:
 _STYLE_RESET = """
     QPushButton {
         background-color: #f5d0c8;
-        border: 1px solid #c84020;
+        border-top:    2px solid #f8e8e4;
+        border-left:   2px solid #f8e8e4;
+        border-bottom: 2px solid #8c2c16;
+        border-right:  2px solid #8c2c16;
         border-radius: 4px;
         color: #601000;
         font-family: 'Courier New', monospace;
@@ -107,10 +175,19 @@ _STYLE_RESET = """
     }
     QPushButton:hover {
         background-color: #e89080;
-        border-color: #a02000;
+        border-top:    2px solid #f0a090;
+        border-left:   2px solid #f0a090;
+        border-bottom: 2px solid #702010;
+        border-right:  2px solid #702010;
     }
     QPushButton:pressed {
-        border: 2px solid #c84020;
+        background-color: #d8b0a8;
+        border-top:    2px solid #8c2c16;
+        border-left:   2px solid #8c2c16;
+        border-bottom: 2px solid #f8e8e4;
+        border-right:  2px solid #f8e8e4;
+        padding-top: 3px; padding-left: 3px;
+        padding-bottom: 1px; padding-right: 1px;
     }
 """
 
@@ -154,7 +231,9 @@ _KEY_POSITIONS = [
 ]
 
 # button_idx → label (for button_clicked signal)
-_IDX_TO_LABEL = {pos[1]: pos[0] for pos in _KEY_POSITIONS}
+_IDX_TO_LABEL  = {pos[1]: pos[0] for pos in _KEY_POSITIONS}
+# label → zone (for button_event press/release visualization)
+_ZONE_BY_LABEL = {pos[0]: pos[6] for pos in _KEY_POSITIONS}
 
 
 
@@ -178,6 +257,8 @@ class G600Canvas(QWidget):
             "border-radius: 16px; border: 2px solid #aaaaaa;"
         )
         self.buttons: dict[int, QPushButton] = {}
+        self._btn_by_label:   dict[str, QPushButton] = {}
+        self._current_raised: dict[str, str] = {}
         for label, idx, x, y, w, h, zone in _KEY_POSITIONS:
             btn = QPushButton(self)
             btn.setGeometry(x, y, w, h)
@@ -186,18 +267,24 @@ class G600Canvas(QWidget):
                 btn.setText(_LOCKED_LABELS[label])
                 btn.setToolTip(f"{label} — locked (cannot be reassigned)")
                 btn.setEnabled(False)
+                self._current_raised[label] = _STYLE_LOCKED
             else:
-                btn.setStyleSheet(_ZONE_STYLES[zone])
+                style = _ZONE_STYLES_RAISED[zone]
+                btn.setStyleSheet(style)
                 btn.setToolTip(label)
                 btn.clicked.connect(lambda _c, lbl=label: self._on_click(lbl))
+                self._current_raised[label] = style
             self.buttons[idx] = btn
+            self._btn_by_label[label] = btn
 
         # Reset button — bottom-left of canvas
         reset_btn = QPushButton("↺ Reset", self)
-        reset_btn.setGeometry(8, 196, 100, 26)
+        reset_btn.setGeometry(8, 198, 100, 26)
         reset_btn.setStyleSheet(_STYLE_RESET)
         reset_btn.setToolTip("Hard-reset the G600 (USB cycle + restart capture)")
         reset_btn.clicked.connect(self._on_reset)
+
+        signals.button_event.connect(self._on_button_event)
 
     def _on_reset(self) -> None:
         self._signals.device_reset.emit(self._plugin_name)
@@ -205,6 +292,23 @@ class G600Canvas(QWidget):
     def _on_click(self, label: str) -> None:
         if label not in _LOCKED_LABELS:
             self._signals.button_clicked.emit(self._plugin_name, label)
+
+    def _on_button_event(self, plugin_name: str, button_id: str, pressed: bool) -> None:
+        if plugin_name != self._plugin_name:
+            return
+        btn = self._btn_by_label.get(button_id)
+        if btn is None:
+            return
+        try:
+            if pressed:
+                if button_id in _LOCKED_LABELS:
+                    btn.setStyleSheet(_STYLE_LOCKED_SUNKEN)
+                else:
+                    btn.setStyleSheet(_ZONE_STYLES_SUNKEN[_ZONE_BY_LABEL[button_id]])
+            else:
+                btn.setStyleSheet(self._current_raised[button_id])
+        except RuntimeError:
+            pass  # canvas destroyed while capture thread still running
 
     def update_bindings(self, bindings: dict[str, str]) -> None:
         """
@@ -218,8 +322,11 @@ class G600Canvas(QWidget):
             btn = self.buttons[idx]
             display = bindings.get(label, "")
             if display:
-                btn.setStyleSheet(_ZONE_STYLES[zone])
+                style = _ZONE_STYLES_RAISED[zone]
+                btn.setStyleSheet(style)
                 btn.setText(f"{label}\n{display}")
             else:
-                btn.setStyleSheet(_dimmed(_ZONE_STYLES[zone]))
+                style = _dimmed(_ZONE_STYLES_RAISED[zone])
+                btn.setStyleSheet(style)
                 btn.setText(f"{label}\n—")
+            self._current_raised[label] = style

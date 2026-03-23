@@ -155,6 +155,10 @@ class G13Plugin(DevicePlugin):
             from plugins.g13.raw_capture import G13RawCapture  # type: ignore
             self._capture = G13RawCapture()
             self._capture.start()
+            plugin_name = self.name
+            self._capture.add_persistent_callback(
+                lambda btn_id, pressed: signals.button_event.emit(plugin_name, btn_id, pressed)
+            )
         except Exception as e:
             self._capture = None
             if signals:

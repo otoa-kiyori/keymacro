@@ -101,7 +101,8 @@ class G13RawCapture(threading.Thread):
         self._routing: dict[str, object] = {}
         self._lock       = threading.Lock()
         self._stop_event = threading.Event()
-        self._raw_cb     = None
+        self._raw_cb       = None
+        self._persistent_cbs: list = []
 
         self._dev    = None   # usb.core.Device
         self._uinput = None   # evdev.UInput  (None until /dev/uinput is ready)
@@ -135,6 +136,12 @@ class G13RawCapture(threading.Thread):
         """Register fn(button_id: str, pressed: bool) — fires on every button event."""
         with self._lock:
             self._raw_cb = fn
+
+    def add_persistent_callback(self, fn) -> None:
+        """Register fn(button_id: str, pressed: bool) — always called, never cleared.
+        Unlike set_raw_callback(), this is not affected by the debug window."""
+        with self._lock:
+            self._persistent_cbs.append(fn)
 
     def set_debug_mode(self, enabled: bool) -> None:
         """No-op on G13 — unrouted buttons are already swallowed, nothing to suppress."""
@@ -313,14 +320,21 @@ class G13RawCapture(threading.Thread):
 
     def _on_button(self, button_id: str, pressed: bool) -> None:
         with self._lock:
-            cb    = self._raw_cb
-            macro = self._routing.get(button_id)
+            cb         = self._raw_cb
+            macro      = self._routing.get(button_id)
+            persistent = list(self._persistent_cbs)
 
         if cb:
             try:
                 cb(button_id, pressed)
             except Exception as e:
                 print(f"[G13] raw callback raised: {e!r}", flush=True)
+
+        for pcb in persistent:
+            try:
+                pcb(button_id, pressed)
+            except Exception as e:
+                print(f"[G13] persistent callback raised: {e!r}", flush=True)
 
         # Only submit macros when uinput is ready; silently skip otherwise
         if macro is not None and self._uinput is not None:

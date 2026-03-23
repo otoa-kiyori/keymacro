@@ -85,6 +85,10 @@ class G600Plugin(DevicePlugin):
         try:
             self._capture = G600RawCapture()
             self._capture.start()
+            plugin_name = self.name
+            self._capture.add_persistent_callback(
+                lambda btn_id, pressed: signals.button_event.emit(plugin_name, btn_id, pressed)
+            )
         except Exception as e:
             self._capture = None
             if signals:

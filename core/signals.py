@@ -34,7 +34,8 @@ class AppSignals(QObject):
 
     Device canvas events
     ────────────────────
-    button_clicked(plugin, button_id)  User clicked a button on a device canvas
+    button_clicked(plugin, button_id)        User clicked a button on a device canvas
+    button_event(plugin, button_id, pressed) Physical button pressed/released on device
 
     UI utility
     ──────────
@@ -60,6 +61,7 @@ class AppSignals(QObject):
 
     # ── Device canvas ─────────────────────────────────────────────────────────
     button_clicked = pyqtSignal(str, str)          # plugin_name, button_id
+    button_event   = pyqtSignal(str, str, bool)    # plugin_name, button_id, pressed
 
     # ── UI utility ────────────────────────────────────────────────────────────
     status_message = pyqtSignal(str)

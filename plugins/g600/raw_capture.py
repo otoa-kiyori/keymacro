@@ -105,8 +105,9 @@ class G600RawCapture(threading.Thread):
         self._abs_state: dict[str, int] = {}  # device_suffix → current bitmask
 
         self.error: str | None = None
-        self._raw_cb   = None
-        self._debug_mode = False   # when True: suppress non-locked button passthrough
+        self._raw_cb        = None
+        self._persistent_cbs: list = []
+        self._debug_mode    = False   # when True: suppress non-locked button passthrough
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -139,6 +140,12 @@ class G600RawCapture(threading.Thread):
         """Register fn(button_id: str, pressed: bool) — fires on every button event."""
         with self._lock:
             self._raw_cb = fn
+
+    def add_persistent_callback(self, fn) -> None:
+        """Register fn(button_id: str, pressed: bool) — always called, never cleared.
+        Unlike set_raw_callback(), this is not affected by the debug window."""
+        with self._lock:
+            self._persistent_cbs.append(fn)
 
     def set_debug_mode(self, enabled: bool) -> None:
         """When True, non-locked buttons are suppressed (not passed to OS).
@@ -305,6 +312,16 @@ class G600RawCapture(threading.Thread):
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
+    def _fire_persistent(self, button_id: str, pressed: bool) -> None:
+        """Call all persistent callbacks (canvas visualization etc.)."""
+        with self._lock:
+            persistent = list(self._persistent_cbs)
+        for pcb in persistent:
+            try:
+                pcb(button_id, pressed)
+            except Exception as e:
+                print(f"[G600] persistent callback raised: {e!r}", flush=True)
+
     def _dispatch(self, event: "evdev.InputEvent", device: str) -> None:
         q = get_queue()
 
@@ -329,6 +346,7 @@ class G600RawCapture(threading.Thread):
                         cb(defn.button_id, pressed)
                     except Exception as e:
                         print(f"[G600] ABS callback raised: {e!r}", flush=True)
+                self._fire_persistent(defn.button_id, pressed)
                 macro = routing.get((device, mask))
                 if macro is not None and self._uinput is not None:
                     q.submit_macro(defn.button_id, pressed, macro, self._uinput)
@@ -350,21 +368,24 @@ class G600RawCapture(threading.Thread):
             cb    = self._raw_cb
             debug = self._debug_mode
 
-        if cb:
-            if defn and event.value in (defn.press_value, defn.release_value):
-                # Known button — report with its label
-                pressed = (event.value == defn.press_value)
+        if defn and event.value in (defn.press_value, defn.release_value):
+            # Known button — report with its label
+            pressed = (event.value == defn.press_value)
+            if cb:
                 try:
                     cb(defn.button_id, pressed)
                 except Exception as e:
                     print(f"[G600] KEY callback raised: {e!r}", flush=True)
-            elif not defn and event.value in (0, 1):
-                # Unknown button — report with raw info so debug window can surface it
-                pressed = bool(event.value)
+            self._fire_persistent(defn.button_id, pressed)
+        elif not defn and event.value in (0, 1):
+            # Unknown button — report with raw info so debug window can surface it
+            pressed = bool(event.value)
+            if cb:
                 try:
                     cb(f"?{device}:EV_KEY:{event.code}", pressed)
                 except Exception as e:
                     print(f"[G600] KEY callback raised (unknown): {e!r}", flush=True)
+            self._fire_persistent(f"?{device}:EV_KEY:{event.code}", pressed)
 
         if macro is None:
             # Only relay through uinput for grabbed interfaces.
