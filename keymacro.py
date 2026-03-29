@@ -38,7 +38,6 @@ def main() -> int:
 
     km = KMApp(app)
     km.start()
-    km._window.show()
 
     # Shut down while the event loop is still running so D-Bus cleanup works.
     app.aboutToQuit.connect(km.shutdown)

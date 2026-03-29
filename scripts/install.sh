@@ -10,7 +10,7 @@
 #   3. Installs udev rules for core and all device plugins
 #   4. Loads the uinput kernel module and persists it across reboots
 #   5. Adds the current user to the input and plugdev groups
-#   6. Creates a launcher script at ~/bin/keymacro
+#   6. Creates a launcher script at ~/scripts/keymacro
 #   7. Installs the autostart entry so keymacro starts with KDE
 #   8. Installs the application menu entry so keymacro appears in KDE start menu
 
@@ -19,7 +19,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RULES_DST_DIR="/etc/udev/rules.d"
 MODULES_FILE="/etc/modules-load.d/keymacro.conf"
-LAUNCHER="$HOME/bin/keymacro"
+LAUNCHER="$HOME/scripts/keymacro"
 AUTOSTART_DIR="$HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/keymacro.desktop"
 APPS_DIR="$HOME/.local/share/applications"
@@ -119,12 +119,12 @@ echo "    $USER added to: input, plugdev"
 # ── Step 6: Launcher script ───────────────────────────────────────────────────
 
 step "Creating launcher script..."
-mkdir -p "$HOME/bin"
+mkdir -p "$HOME/scripts"
 cat > "$LAUNCHER" << LAUNCHEREOF
 #!/usr/bin/env bash
 exec python3 "$REPO_ROOT/keymacro.py" "\$@"
 LAUNCHEREOF
-chmod +x "$LAUNCHER"
+chmod 555 "$LAUNCHER"
 echo "    Created: $LAUNCHER"
 
 # ── Step 7: Autostart entry ───────────────────────────────────────────────────
