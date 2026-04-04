@@ -4,6 +4,16 @@ A KDE Plasma Wayland tray application for mapping macros to extra buttons on gam
 
 ---
 
+## Changelog
+
+**v0.9.4** — Fix plasmashell memory leak caused by tray notifications. `QSystemTrayIcon.showMessage()` was sending notifications without proper KDE metadata, triggering QML TypeErrors in plasmashell (~25–30 MB/min leak). Replaced with `notify-send` subprocess for correct D-Bus notification delivery. Error/debug messages are now suppressed from desktop popups and remain in the status bar only.
+
+**v0.9.3** — App now starts minimized to the system tray (no window on startup). Launcher moved to `~/scripts/keymacro`, set read-only.
+
+**v0.9.1** — Live button press visualization on device canvases.
+
+---
+
 ## What it does
 
 - **Macro assignment** — bind any button on a supported device to a macro: key sequences, mouse clicks, holds, releases, waits, or combinations
@@ -103,7 +113,7 @@ The installer handles everything in order:
 | 3 | Installs udev rules for core and all device plugins |
 | 4 | Loads the `uinput` kernel module and makes it persist across reboots |
 | 5 | Adds your user to the `input` and `plugdev` groups |
-| 6 | Creates a launcher script at `~/bin/keymacro` |
+| 6 | Creates a launcher script at `~/scripts/keymacro` |
 | 7 | Installs a KDE autostart entry (keymacro starts with your desktop) |
 | 8 | Adds **KeyMacro** to the KDE application menu |
 
@@ -135,7 +145,7 @@ The uninstaller:
 |---|---|
 | 1 | Verifies sudo access |
 | 2 | Removes the KDE autostart and application menu entries |
-| 3 | Removes the `~/bin/keymacro` launcher |
+| 3 | Removes the `~/scripts/keymacro` launcher |
 | 4 | Removes all keymacro udev rules and reloads udev |
 | 5 | Removes `/etc/modules-load.d/keymacro.conf` |
 | 6 | **Intelligently** removes Python packages — queries `apt-cache rdepends` at runtime and only removes packages that nothing else on your system needs |

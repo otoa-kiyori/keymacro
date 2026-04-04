@@ -16,6 +16,7 @@ Menu:
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 from PyQt6.QtGui import QIcon, QAction
@@ -131,6 +132,20 @@ class KMTrayIcon(QSystemTrayIcon):
         self.setToolTip(f"keymacro — {profile_name}")
         self._rebuild_menu()
 
+    _NOTIFY_SKIP = ("open_window", "failed", "unavailable", "not found", "error")
+
     def _on_status_message(self, msg: str) -> None:
-        if msg != "open_window":
-            self.showMessage("keymacro", msg, QSystemTrayIcon.MessageIcon.Information, 5000)
+        if any(kw in msg.lower() for kw in self._NOTIFY_SKIP):
+            return
+        try:
+            subprocess.Popen(
+                ["notify-send",
+                 "--app-name=keymacro",
+                 "--icon=input-gaming",
+                 "--expire-time=5000",
+                 "keymacro", msg],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            pass  # notify-send not installed — silent fallback
